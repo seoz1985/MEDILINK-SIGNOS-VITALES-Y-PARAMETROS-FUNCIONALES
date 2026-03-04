@@ -1,10 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useApp, type UserRole } from "@/lib/app-context"
+import { useState } from "react"
+import { useApp } from "@/lib/app-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Heart, Stethoscope, User, ArrowLeft, Eye, EyeOff, ShieldCheck, Lock, Sparkles } from "lucide-react"
+import { Heart, ArrowLeft, Eye, EyeOff, ShieldCheck, Lock, Sparkles } from "lucide-react"
 
 /* ── Shared animated background for auth screens ── */
 function AuthBackground() {
@@ -156,16 +156,10 @@ function AuthInput({
 export function LoginScreen() {
   const { navigate, setRole } = useApp()
   const [showPassword, setShowPassword] = useState(false)
-  const [selectedRole, setSelectedRole] = useState<UserRole>(null)
 
   const handleLogin = () => {
-    if (selectedRole === "patient") {
-      setRole("patient")
-      navigate("patient-dashboard")
-    } else if (selectedRole === "doctor") {
-      setRole("doctor")
-      navigate("doctor-dashboard")
-    }
+    setRole("patient")
+    navigate("patient-dashboard")
   }
 
   return (
@@ -193,12 +187,6 @@ export function LoginScreen() {
               </div>
 
               <div className="space-y-5">
-                {/* Role Selection */}
-                <div className="grid grid-cols-2 gap-3">
-                  <RolePill role="patient" label="Paciente" icon={User} selected={selectedRole === "patient"} onClick={() => setSelectedRole("patient")} />
-                  <RolePill role="doctor" label="Médico" icon={Stethoscope} selected={selectedRole === "doctor"} onClick={() => setSelectedRole("doctor")} />
-                </div>
-
                 <AuthInput id="email" label="Correo electrónico" type="email" placeholder="tu@correo.com" />
 
                 <AuthInput
@@ -211,9 +199,8 @@ export function LoginScreen() {
                 />
 
                 <Button
-                  className="w-full h-12 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold text-base shadow-lg shadow-cyan-500/25 transition-all duration-300 hover:shadow-cyan-500/40 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40 disabled:hover:scale-100"
+                  className="w-full h-12 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold text-base shadow-lg shadow-cyan-500/25 transition-all duration-300 hover:shadow-cyan-500/40 hover:scale-[1.01] active:scale-[0.99]"
                   onClick={handleLogin}
-                  disabled={!selectedRole}
                 >
                   Ingresar
                 </Button>
@@ -255,18 +242,12 @@ export function LoginScreen() {
 
 /* ━━━━━━━━━━━━━━━━━━━ REGISTER SCREEN ━━━━━━━━━━━━━━━━━ */
 export function RegisterScreen() {
-  const { navigate, role, setRole } = useApp()
+  const { navigate, setRole } = useApp()
   const [showPassword, setShowPassword] = useState(false)
-  const [selectedRole, setSelectedRole] = useState<UserRole>(role)
 
   const handleRegister = () => {
-    if (selectedRole === "patient") {
-      setRole("patient")
-      navigate("patient-dashboard")
-    } else if (selectedRole === "doctor") {
-      setRole("doctor")
-      navigate("doctor-dashboard")
-    }
+    setRole("patient")
+    navigate("patient-dashboard")
   }
 
   return (
@@ -294,22 +275,12 @@ export function RegisterScreen() {
               </div>
 
               <div className="space-y-4">
-                {/* Role Selection */}
-                <div className="grid grid-cols-2 gap-3">
-                  <RolePill role="patient" label="Paciente" icon={User} selected={selectedRole === "patient"} onClick={() => setSelectedRole("patient")} />
-                  <RolePill role="doctor" label="Médico" icon={Stethoscope} selected={selectedRole === "doctor"} onClick={() => setSelectedRole("doctor")} />
-                </div>
-
                 <div className="grid grid-cols-2 gap-3">
                   <AuthInput id="firstName" label="Nombre" placeholder="Tu nombre" />
                   <AuthInput id="lastName" label="Apellido" placeholder="Tu apellido" />
                 </div>
 
                 <AuthInput id="regEmail" label="Correo electrónico" type="email" placeholder="tu@correo.com" />
-
-                {selectedRole === "doctor" && (
-                  <AuthInput id="license" label="Número de licencia médica" placeholder="Ej: MED-12345" />
-                )}
 
                 <AuthInput
                   id="regPassword"
@@ -323,7 +294,6 @@ export function RegisterScreen() {
                 <Button
                   className="w-full h-12 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold text-base shadow-lg shadow-cyan-500/25 transition-all duration-300 hover:shadow-cyan-500/40 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40 disabled:hover:scale-100"
                   onClick={handleRegister}
-                  disabled={!selectedRole}
                 >
                   Crear Cuenta
                 </Button>
