@@ -172,13 +172,13 @@ function VoiceMicButton({
 /*  MAIN COMPONENT                                                */
 /* ═══════════════════════════════════════════════════════════════ */
 
-/** Messages the AI assistant speaks at each step */
+/** Messages the AI assistant speaks at each step — tono cálido y empático */
 const STEP_VOICE_MESSAGES: Record<number, string> = {
-  0: "¡Hola! Soy tu asistente virtual de salud de VitaLink. Te acompañaré en el proceso de evaluación de parámetros funcionales mediante nuestra tecnología de inteligencia artificial. El proceso toma solo 2 a 3 minutos. ¿Comenzamos?",
-  1: "Antes de continuar, es necesario que leas y aceptes nuestro consentimiento informado. Por favor lee el documento completo desplazándote hasta el final.",
-  2: "Ahora necesito tus datos de identificación. Puedes escribir o usar el micrófono para dictar. ¿Realizas esta evaluación para ti mismo o para otra persona como acudiente?",
-  3: "Déjame explicarte en qué consiste el procedimiento. Esta evaluación utiliza inteligencia artificial y la cámara de tu celular para estimar parámetros funcionales. No es una toma de signos vitales convencional. Los resultados son probabilísticos y deben correlacionarse con atención médica profesional.",
-  4: "Último paso antes de la toma. Necesito conocer el motivo de tu consulta y algunos antecedentes clínicos para orientar el análisis de inteligencia artificial. Puedes usar el micrófono para dictar.",
+  0: "¡Hola! Bienvenido a VitaLink. Voy a acompañarte durante todo este proceso, paso a paso, con calma. Lo que vamos a hacer es una evaluación rápida de tus parámetros de salud. Son solo unos minutitos, entre dos y tres. Puedes tomarte tu tiempo, no hay prisa. ¿Listo para comenzar?",
+  1: "Perfecto. Antes de avanzar, necesito que revises un documento importante: nuestro consentimiento informado. Tómate un momento para leerlo con calma, desplázate hasta el final. Es importante que entiendas bien cómo funciona todo y qué puedes esperar.",
+  2: "Muy bien. Ahora voy a pedirte unos datos básicos de identificación. Puedes escribirlos con el teclado, o si prefieres, toca el ícono del micrófono al lado de cada campo y me los dictas con tu voz. Cuéntame, ¿esta evaluación es para ti, o estás acompañando a otra persona?",
+  3: "Déjame explicarte cómo funciona esto. Vamos a usar la cámara de tu celular junto con inteligencia artificial para analizar pequeñas variaciones en tu rostro que nos dan información sobre tu salud. No es una toma de signos vitales tradicional. Son estimaciones inteligentes que deben complementarse siempre con atención médica profesional. Es tecnología de apoyo, pensada para cuidarte mejor.",
+  4: "Ya casi terminamos la preparación. En este último paso necesito saber cuál es el motivo de tu consulta y algunos datos sobre tu historial de salud. Esto me ayuda a orientar mejor el análisis. Si quieres, usa el micrófono para contarme con tus propias palabras.",
 }
 
 export function PatientOnboarding() {
@@ -208,8 +208,9 @@ export function PatientOnboarding() {
     sttSupported,
   } = useSpeech({
     lang: "es-CO",
-    rate: 0.95,
+    rate: 0.92,
     pitch: 1.0,
+    breathPauseMs: 400,
     onResult: (transcript, isFinal) => {
       if (!voiceTarget || !isFinal) return
       // Route dictated text to the correct field

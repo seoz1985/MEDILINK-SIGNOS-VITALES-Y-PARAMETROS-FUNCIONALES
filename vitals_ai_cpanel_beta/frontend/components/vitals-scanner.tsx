@@ -167,16 +167,16 @@ export function VitalsScanner() {
   const [lastVitals, setLastVitals] = useState<any>(null)
 
   // ── AI assistant voice (TTS) for scanner guidance ──
-  const { speak: aiSpeak, stopSpeaking: aiStop, isSpeaking: aiIsSpeaking, muted: aiMuted, toggleMute: aiToggleMute, ttsSupported: aiTTS } = useSpeech({ lang: "es-CO", rate: 0.95, pitch: 1.0 })
+  const { speak: aiSpeak, stopSpeaking: aiStop, isSpeaking: aiIsSpeaking, muted: aiMuted, toggleMute: aiToggleMute, ttsSupported: aiTTS } = useSpeech({ lang: "es-CO", rate: 0.92, pitch: 1.0, breathPauseMs: 400 })
   const prevPhaseRef = useRef<AppPhase>(initialPhase)
   useEffect(() => {
     if (prevPhaseRef.current === appPhase) return
     prevPhaseRef.current = appPhase
     const msgs: Record<string, string> = {
-      idle: "Todo listo. Cuando estés preparado, presiona el botón para iniciar la evaluación. Recuerda mantener buena iluminación y el rostro centrado.",
-      scanning: "Iniciando captura. Mantén tu rostro estable frente a la cámara. El proceso dura aproximadamente 90 segundos.",
-      analyzing: "Captura completada. Estoy analizando tus datos clínicos con inteligencia artificial. Un momento por favor.",
-      complete: "Análisis terminado. Puedes ver tus resultados a continuación. Recuerda que estos valores son estimaciones probabilísticas y deben ser correlacionados con atención médica profesional.",
+      idle: "Todo listo. Cuando te sientas preparado, presiona el botón para empezar. Un consejo: busca un lugar con buena luz, mantén tu rostro bien centrado en la cámara, y trata de quedarte lo más quieto posible. Yo te voy guiando.",
+      scanning: "Perfecto, estamos empezando la captura. Mantén tu rostro estable frente a la cámara, relájate. Esto toma alrededor de noventa segundos. Respira con calma, yo te aviso cuando terminemos.",
+      analyzing: "¡Muy bien! La captura quedó perfecta. Ahora estoy procesando tus datos con inteligencia artificial. Dame un momentito, esto no tarda mucho.",
+      complete: "Listo, ya tengo tus resultados. Puedes revisarlos aquí abajo con detalle. Ten en cuenta que estos valores son estimaciones inteligentes y siempre es importante complementarlos con la opinión de un profesional de salud. Cuídate mucho.",
     }
     const msg = msgs[appPhase]
     if (msg) aiSpeak(msg)
