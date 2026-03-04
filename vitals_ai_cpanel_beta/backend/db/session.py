@@ -8,14 +8,13 @@ _SessionLocal = None
 def get_engine():
     global _engine
     if _engine is None:
-        if not settings.SQLALCHEMY_DATABASE_URI:
-            raise RuntimeError('Database is not configured. Set DB_HOST, DB_NAME, DB_USER, DB_PASSWORD.')
-        _engine = create_engine(
-            settings.SQLALCHEMY_DATABASE_URI,
-            pool_pre_ping=True,
-            pool_recycle=280,
-            future=True,
-        )
+        uri = settings.SQLALCHEMY_DATABASE_URI
+        if not uri:
+            raise RuntimeError('Database is not configured. Set DB_HOST, DB_NAME, DB_USER, DB_PASSWORD or DATABASE_URL.')
+        kwargs = dict(pool_pre_ping=True, future=True)
+        if not uri.startswith('sqlite'):
+            kwargs['pool_recycle'] = 280
+        _engine = create_engine(uri, **kwargs)
     return _engine
 
 

@@ -27,11 +27,21 @@ import {
   FlaskConical,
   ScanEye,
   X,
+  Send,
+  Hospital,
+  QrCode,
+  Mail,
+  Copy,
+  Shield,
+  Clock,
+  Video,
+  ArrowRight,
 } from "lucide-react"
 import { mockVitalsHistory } from "@/lib/mock-data"
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts"
 import { apiPost } from "@/lib/api"
 import { TriageQuestionnaire, type Questionnaire } from "@/components/triage-questionnaire"
+import QRCode from "qrcode"
 import {
   useRPPGScan,
   PHASE,
@@ -141,6 +151,13 @@ export function VitalsScanner() {
   const analyzingRef = useRef(false)
   const appPhaseRef = useRef<AppPhase>("questionnaire")
   appPhaseRef.current = appPhase
+
+  // ── Telemedicina state ──
+  const [teleToken, setTeleToken] = useState<string | null>(null)
+  const [teleQrDataUrl, setTeleQrDataUrl] = useState<string | null>(null)
+  const [teleSending, setTeleSending] = useState(false)
+  const [teleChoice, setTeleChoice] = useState<"none" | "telemedicine" | "kiosk">("none")
+  const [lastVitals, setLastVitals] = useState<any>(null)
 
   // ── Guard nuclear: impide retroceso a questionnaire/idle durante escaneo ──
   const scanActiveRef = useRef(false)
@@ -335,6 +352,18 @@ export function VitalsScanner() {
           timestamp: new Date(),
         }
         addVitals(vitals)
+        setLastVitals({
+          heart_rate: vitals.heartRate,
+          spo2: vitals.spo2,
+          resp_rate: vitals.respiratoryRate,
+          temp_c: vitals.temperature,
+          bp_sys: finalBpSys,
+          bp_dia: Math.round(bpDia),
+        })
+        // Reset telemedicina state
+        setTeleToken(null)
+        setTeleQrDataUrl(null)
+        setTeleChoice("none")
 
         // Triage
         try {
@@ -441,6 +470,41 @@ export function VitalsScanner() {
     unlockNavigation()
     setAppPhase(questionnaire ? "idle" : "questionnaire")
   }, [questionnaire, stopCamera, unlockNavigation])
+
+  // ── Telemedicina: Solicitar token ────────────────────────────
+  const requestTelemedicineToken = useCallback(async (type: "telemedicine" | "in_person_kiosk") => {
+    setTeleSending(true)
+    setTeleChoice(type === "telemedicine" ? "telemedicine" : "kiosk")
+    try {
+      const res: any = await apiPost("/api/v1/telemedicine/token", {
+        patient_name: (questionnaire as any)?.name || "Paciente",
+        patient_email: (questionnaire as any)?.email || "",
+        patient_id: "",
+        vitals: lastVitals,
+        triage: triage,
+        questionnaire,
+        attention_type: type,
+        assessment_id: triage?.assessment_id || null,
+      })
+      if (res?.token) {
+        setTeleToken(res.token)
+        // Generar QR
+        try {
+          const qrUrl = await QRCode.toDataURL(res.qr_data || res.token, {
+            width: 280,
+            margin: 2,
+            color: { dark: "#1a1a2e", light: "#ffffff" },
+            errorCorrectionLevel: "M",
+          })
+          setTeleQrDataUrl(qrUrl)
+        } catch { /* QR fail — token visible */ }
+      }
+    } catch (err) {
+      console.error("[Tele] Error:", err)
+    } finally {
+      setTeleSending(false)
+    }
+  }, [questionnaire, lastVitals, triage])
 
   // ── Helpers de UI ───────────────────────────────────────────
   const getStatus = (type: string, value: number): "normal" | "warning" | "critical" => {
@@ -623,7 +687,7 @@ export function VitalsScanner() {
     : Math.max(0, Math.round(TOTAL_MEASUREMENT_SECS * (1 - scanState.totalProgress / 100)))
 
   return (
-    <div className={`min-h-screen bg-background ${scanLocked ? 'pb-0' : 'pb-20'}`}>
+    <div className={`min-h-screen bg-gradient-to-b from-background via-background to-muted/30 ${scanLocked ? 'pb-0' : 'pb-20'}`}>
       <AppHeader title="Signos Vitales" subtitle="Monitoreo Clínico con IA" scanLocked={scanLocked} />
 
       <main className="max-w-lg mx-auto px-4 py-4 space-y-4">
@@ -637,59 +701,63 @@ export function VitalsScanner() {
         )}
 
         {/* ═══ Scanner Card ═══ */}
-        <Card className="overflow-hidden">
+        <Card className="overflow-hidden border-0 shadow-xl bg-card/80 backdrop-blur-sm">
           <CardContent className="p-0">
             <ScanErrorBoundary>
 
             {/* ━━ IDLE ━━ */}
             {appPhase === "idle" && (
               <div className="flex flex-col items-center py-10 px-6 text-center">
-                <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center mb-6 relative">
-                  <Camera className="w-10 h-10 text-primary" />
+                <div className="w-28 h-28 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center mb-6 relative">
+                  <Camera className="w-11 h-11 text-primary" />
                   <div className="absolute inset-0 rounded-full border-2 border-primary/30" style={{ animation: "pulse-ring 2s infinite" }} />
+                  <div className="absolute -inset-1 rounded-full border border-primary/10" style={{ animation: "pulse-ring 2s infinite 0.5s" }} />
                 </div>
-                <h3 className="text-lg font-semibold text-foreground mb-2 font-[family-name:var(--font-space-grotesk)]">
+                <h3 className="text-xl font-bold text-foreground mb-2 tracking-tight font-[family-name:var(--font-space-grotesk)]">
                   Evaluación Clínica por Fases
                 </h3>
-                <p className="text-sm text-muted-foreground mb-4 max-w-xs leading-relaxed">
-                  Protocolo de ~{TOTAL_MEASUREMENT_SECS} segundos en 6 fases interactivas.
-                  Te guiaremos en cada paso para obtener mediciones precisas.
+                <p className="text-sm text-muted-foreground mb-6 max-w-xs leading-relaxed">
+                  Protocolo científico de <span className="font-semibold text-foreground">~{TOTAL_MEASUREMENT_SECS}s</span> en 6 fases.
+                  Te guiaremos paso a paso.
                 </p>
 
-                {/* Mini timeline */}
-                <div className="w-full grid grid-cols-3 gap-1 mb-6 text-[9px] text-muted-foreground">
-                  {[PHASE.CALIBRATION, PHASE.CARDIAC, PHASE.OCULAR, PHASE.RESPIRATORY, PHASE.VASCULAR].map((p) => {
+                {/* Protocol steps */}
+                <div className="w-full space-y-2 mb-6">
+                  {[PHASE.CALIBRATION, PHASE.CARDIAC, PHASE.OCULAR, PHASE.RESPIRATORY, PHASE.VASCULAR].map((p, i) => {
                     const Icon = PHASE_ICONS[p]
                     return (
-                      <div key={p} className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-muted">
-                        <Icon className="w-3 h-3 shrink-0" />
-                        <div className="min-w-0">
-                          <span className="font-medium block truncate">{PHASE_LABELS[p]}</span>
-                          <span className="text-[8px] opacity-60">{PHASE_DURATION[p]}s</span>
+                      <div key={p} className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-muted/50 border border-border/50 hover:bg-muted/80 transition-colors">
+                        <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                          <Icon className="w-3.5 h-3.5 text-primary" />
                         </div>
+                        <div className="flex-1 text-left">
+                          <span className="text-xs font-semibold text-foreground">{PHASE_LABELS[p]}</span>
+                          <span className="text-[10px] text-muted-foreground ml-2">{PHASE_DESC[p]}</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-muted-foreground bg-muted rounded-md px-1.5 py-0.5">{PHASE_DURATION[p]}s</span>
                       </div>
                     )
                   })}
                 </div>
 
-                <Button onClick={doStartScan} size="lg" className="gap-2">
-                  <Camera className="w-4 h-4" /> Iniciar Evaluación
+                <Button onClick={doStartScan} size="lg" className="gap-2.5 px-8 text-base font-semibold shadow-lg shadow-primary/25 hover:shadow-xl hover:shadow-primary/30 transition-all">
+                  <Camera className="w-5 h-5" /> Iniciar Evaluación
                 </Button>
               </div>
             )}
 
             {/* ━━ SCANNING ━━ */}
             {appPhase === "scanning" && (
-              <div className="flex flex-col items-center py-2 px-3">
+              <div className="flex flex-col items-center py-3 px-3">
                 {cameraError && (
-                  <div className="w-full mb-2 p-2 rounded-lg bg-destructive/10 border border-destructive/30 text-xs text-destructive flex items-start gap-2">
+                  <div className="w-full mb-2 p-2.5 rounded-xl bg-destructive/10 border border-destructive/30 text-xs text-destructive flex items-start gap-2">
                     <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                     <span>{cameraError}</span>
                   </div>
                 )}
 
-                {/* ── Timeline bar (compacto) ── */}
-                <div className="w-full flex items-center gap-0.5 mb-2">
+                {/* ── Phase timeline ── */}
+                <div className="w-full flex items-center gap-1 mb-3">
                   {[PHASE.DETECTION, PHASE.CALIBRATION, PHASE.CARDIAC, PHASE.OCULAR, PHASE.RESPIRATORY, PHASE.VASCULAR].map((p) => {
                     const Icon = PHASE_ICONS[p]
                     const isActive = scanState.currentPhase === p
@@ -697,12 +765,12 @@ export function VitalsScanner() {
                     return (
                       <div
                         key={p}
-                        className={`flex-1 flex items-center justify-center gap-0.5 py-1 rounded-md text-[8px] font-medium transition-all duration-300 ${
+                        className={`flex-1 flex items-center justify-center gap-0.5 py-1.5 rounded-lg text-[8px] font-bold uppercase tracking-wider transition-all duration-500 ${
                           isActive
-                            ? "bg-primary text-primary-foreground scale-105 shadow-sm"
+                            ? "bg-gradient-to-r from-primary to-primary/80 text-primary-foreground scale-[1.02] shadow-md shadow-primary/20"
                             : isDone
-                              ? "bg-green-500/20 text-green-700 dark:text-green-400"
-                              : "bg-muted text-muted-foreground"
+                              ? "bg-green-500/15 text-green-600 dark:text-green-400"
+                              : "bg-muted/60 text-muted-foreground/50"
                         }`}
                       >
                         {isDone ? <CheckCircle2 className="w-3 h-3" /> : <Icon className="w-3 h-3" />}
@@ -711,33 +779,28 @@ export function VitalsScanner() {
                   })}
                 </div>
 
-                {/* ── Instrucción principal + cues visuales (ARRIBA del video) ── */}
-                <div className="w-full text-center mb-2 space-y-1">
-                  {/* Phase description */}
-                  <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                {/* ── Instruction panel (above video) ── */}
+                <div className="w-full text-center mb-3 py-3 px-4 rounded-xl bg-gradient-to-r from-muted/80 to-muted/40 border border-border/50">
+                  <p className="text-[10px] text-primary font-bold uppercase tracking-[0.15em] mb-1">
                     {PHASE_DESC[scanState.currentPhase]}
                   </p>
-
-                  {/* Main instruction */}
-                  <p className="text-sm font-semibold text-foreground">
+                  <p className="text-base font-bold text-foreground tracking-tight font-[family-name:var(--font-space-grotesk)]">
                     {scanState.instruction}
                   </p>
 
-                  {/* Breathing circle */}
+                  {/* Breathing guide */}
                   {isBreathing && (
-                    <div className="flex flex-col items-center pt-1">
+                    <div className="flex items-center justify-center gap-3 mt-3">
                       <div
-                        className={`w-10 h-10 rounded-full border-2 border-green-400 flex items-center justify-center transition-transform duration-[2500ms] ease-in-out ${
-                          scanState.breathingGuide === "inhale" ? "scale-125" : "scale-75"
+                        className={`w-12 h-12 rounded-full border-[3px] flex items-center justify-center transition-all duration-[2500ms] ease-in-out ${
+                          scanState.breathingGuide === "inhale"
+                            ? "scale-[1.3] border-blue-400 bg-blue-500/10"
+                            : "scale-[0.7] border-green-400 bg-green-500/10"
                         }`}
                       >
-                        <Wind
-                          className={`w-5 h-5 transition-colors duration-500 ${
-                            scanState.breathingGuide === "inhale" ? "text-blue-400" : "text-green-400"
-                          }`}
-                        />
+                        <Wind className={`w-5 h-5 ${scanState.breathingGuide === "inhale" ? "text-blue-400" : "text-green-400"}`} />
                       </div>
-                      <span className={`text-xs font-medium mt-1 ${
+                      <span className={`text-sm font-bold tracking-wide ${
                         scanState.breathingGuide === "inhale" ? "text-blue-500" : "text-green-500"
                       }`}>
                         {scanState.breathingGuide === "inhale" ? "INHALA ↑" : "EXHALA ↓"}
@@ -745,35 +808,32 @@ export function VitalsScanner() {
                     </div>
                   )}
 
-                  {/* Valsalva countdown */}
+                  {/* Valsalva */}
                   {isVascular && scanState.vascularCue === "hold" && (
-                    <div className="flex flex-col items-center pt-1">
-                      <div className="w-10 h-10 rounded-full border-2 border-amber-400 flex items-center justify-center bg-amber-500/10">
-                        <span className="text-xl font-bold text-amber-500 font-mono">{valsalvaSecsLeft}</span>
+                    <div className="flex items-center justify-center gap-3 mt-3">
+                      <div className="w-12 h-12 rounded-full border-[3px] border-amber-400 flex items-center justify-center bg-amber-500/10">
+                        <span className="text-2xl font-black text-amber-500 font-mono">{valsalvaSecsLeft}</span>
                       </div>
-                      <span className="text-xs font-medium mt-1 text-amber-500">RETEN ALIENTO</span>
+                      <span className="text-sm font-bold text-amber-500 tracking-wide">RETÉN ALIENTO</span>
                     </div>
                   )}
-
                   {isVascular && scanState.vascularCue === "release" && (
-                    <div className="flex flex-col items-center pt-1">
-                      <span className="text-xs font-medium text-green-500">¡SUELTA! Respira normal</span>
-                    </div>
+                    <p className="mt-2 text-sm font-bold text-green-500">¡SUELTA! Respira normal</p>
                   )}
 
-                  {/* Ocular icon */}
+                  {/* Ocular */}
                   {isOcular && (
-                    <div className="flex flex-col items-center pt-1">
-                      <div className="w-10 h-10 rounded-full border-2 border-cyan-400 flex items-center justify-center bg-cyan-500/10 animate-pulse">
+                    <div className="flex items-center justify-center gap-3 mt-3">
+                      <div className="w-12 h-12 rounded-full border-[3px] border-cyan-400 flex items-center justify-center bg-cyan-500/10 animate-pulse">
                         <ScanEye className="w-5 h-5 text-cyan-400" />
                       </div>
-                      <span className="text-xs font-medium mt-1 text-cyan-500">OJO DERECHO</span>
+                      <span className="text-sm font-bold text-cyan-500 tracking-wide">OJO DERECHO</span>
                     </div>
                   )}
                 </div>
 
-                {/* ── Video + overlays (reducido para dejar espacio) ── */}
-                <div className="relative w-full rounded-xl bg-black mb-2 overflow-hidden" style={{ aspectRatio: '4/3', maxHeight: '45vh' }}>
+                {/* ── Video viewport ── */}
+                <div className="relative w-full rounded-2xl bg-black mb-3 overflow-hidden ring-1 ring-white/10" style={{ aspectRatio: '4/3', maxHeight: '42vh' }}>
                   <video
                     ref={videoRef}
                     autoPlay
@@ -783,7 +843,7 @@ export function VitalsScanner() {
                     style={{ transform: "scaleX(-1)" }}
                   />
 
-                  {/* Aro facial (se oculta en fase ocular) */}
+                  {/* Face ring */}
                   {!isOcular && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                       <div
@@ -793,37 +853,28 @@ export function VitalsScanner() {
                       >
                         <div
                           className={`absolute inset-1 rounded-full border-2 border-dashed transition-colors duration-500 ${ringDashedColor}`}
-                          style={{
-                            animation: scanState.faceDetected
-                              ? "spin 8s linear infinite"
-                              : "spin 3s linear infinite",
-                          }}
+                          style={{ animation: scanState.faceDetected ? "spin 8s linear infinite" : "spin 3s linear infinite" }}
                         />
                         {isBreathing && (
                           <div
                             className="absolute inset-0 rounded-full border-2 border-green-300/50 transition-transform duration-[2500ms] ease-in-out"
-                            style={{
-                              transform: scanState.breathingGuide === "inhale" ? "scale(1.08)" : "scale(0.88)",
-                            }}
+                            style={{ transform: scanState.breathingGuide === "inhale" ? "scale(1.08)" : "scale(0.88)" }}
                           />
                         )}
                       </div>
                     </div>
                   )}
 
-                  {/* Overlay OCULAR: guía de ojo */}
+                  {/* Eye overlay */}
                   {isOcular && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                       <div className="relative">
-                        {/* Forma de ojo */}
                         <div className="w-52 h-28 border-[3px] border-cyan-400 shadow-[0_0_30px_rgba(34,211,238,0.4)] rounded-[50%] flex items-center justify-center">
-                          {/* Pupila */}
                           <div className="w-14 h-14 rounded-full border-2 border-cyan-300 flex items-center justify-center">
                             <div className="w-6 h-6 rounded-full bg-cyan-400/30 animate-pulse" />
                           </div>
                         </div>
-                        {/* Label */}
-                        <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-cyan-500/80 text-white px-3 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap">
+                        <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-cyan-500/90 text-white px-3 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap tracking-wide">
                           Análisis Ocular — Micro-tremor
                         </div>
                       </div>
@@ -831,68 +882,61 @@ export function VitalsScanner() {
                   )}
 
                   {/* Scan line */}
-                  <div
-                    className="absolute left-0 right-0 h-0.5 bg-primary/60 shadow-[0_0_6px_var(--primary)]"
-                    style={{ top: `${scanState.totalProgress}%`, transition: "top 1s linear" }}
-                  />
+                  <div className="absolute left-0 right-0 h-0.5 bg-primary/60 shadow-[0_0_8px_var(--primary)]" style={{ top: `${scanState.totalProgress}%`, transition: "top 1s linear" }} />
 
-                  {/* Corner brackets */}
-                  <div className="absolute top-3 left-3 w-6 h-6 border-l-2 border-t-2 border-white/70" />
-                  <div className="absolute top-3 right-3 w-6 h-6 border-r-2 border-t-2 border-white/70" />
-                  <div className="absolute bottom-3 left-3 w-6 h-6 border-l-2 border-b-2 border-white/70" />
-                  <div className="absolute bottom-3 right-3 w-6 h-6 border-r-2 border-b-2 border-white/70" />
+                  {/* Corner brackets (sleeker) */}
+                  <div className="absolute top-2 left-2 w-5 h-5 border-l-2 border-t-2 border-white/50 rounded-tl" />
+                  <div className="absolute top-2 right-2 w-5 h-5 border-r-2 border-t-2 border-white/50 rounded-tr" />
+                  <div className="absolute bottom-2 left-2 w-5 h-5 border-l-2 border-b-2 border-white/50 rounded-bl" />
+                  <div className="absolute bottom-2 right-2 w-5 h-5 border-r-2 border-b-2 border-white/50 rounded-br" />
 
-                  {/* HR overlay top-center */}
-                  <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm text-white px-3 py-1 rounded-full flex items-center gap-2 text-sm">
+                  {/* HR badge */}
+                  <div className="absolute top-2.5 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md text-white px-3 py-1 rounded-full flex items-center gap-2 text-sm border border-white/10">
                     <Heart className="w-3.5 h-3.5 text-red-400 animate-pulse" />
-                    <span className="font-mono font-semibold">{scanState.instantHR ?? "--"}</span>
-                    <span className="text-xs text-white/70">bpm</span>
+                    <span className="font-mono font-bold tabular-nums">{scanState.instantHR ?? "--"}</span>
+                    <span className="text-[10px] text-white/60 font-medium">bpm</span>
                   </div>
 
-                  {/* Face badge top-right */}
-                  <div
-                    className={`absolute top-3 right-3 px-2 py-1 rounded-full text-[10px] font-medium flex items-center gap-1 transition-colors duration-300 ${
-                      scanState.faceDetected
-                        ? "bg-green-500/80 text-white"
-                        : "bg-red-500/80 text-white animate-pulse"
-                    }`}
-                  >
+                  {/* Face status */}
+                  <div className={`absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full text-[10px] font-bold flex items-center gap-1.5 transition-colors duration-300 border ${
+                    scanState.faceDetected
+                      ? "bg-green-500/90 text-white border-green-400/50"
+                      : "bg-red-500/90 text-white animate-pulse border-red-400/50"
+                  }`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${scanState.faceDetected ? "bg-white" : "bg-white/60"}`} />
                     {scanState.faceLocked ? "Rostro ✓" : scanState.faceDetected ? "Detectando…" : "Sin rostro"}
                   </div>
 
                   {/* Bottom info bar */}
-                  <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm text-white px-3 py-1 rounded-full text-xs flex items-center gap-2">
-                    <span className="font-medium">{PHASE_LABELS[scanState.currentPhase]}</span>
-                    <span className="text-white/30">|</span>
-                    <span>{scanState.totalFramesSent} frames</span>
-                    <span className="text-white/30">|</span>
-                    <span>~{secsRemaining}s rest.</span>
+                  <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md text-white px-4 py-1.5 rounded-full text-[11px] flex items-center gap-2 border border-white/10">
+                    <span className="font-bold">{PHASE_LABELS[scanState.currentPhase]}</span>
+                    <span className="text-white/25">│</span>
+                    <span className="font-mono tabular-nums">{scanState.totalFramesSent}</span>
+                    <span className="text-white/40">fr</span>
+                    <span className="text-white/25">│</span>
+                    <Clock className="w-3 h-3 text-white/50" />
+                    <span className="font-mono tabular-nums">{secsRemaining}s</span>
                   </div>
                 </div>
 
-                {/* ── Global + phase progress ── */}
-                <div className="w-full space-y-1">
+                {/* ── Progress section ── */}
+                <div className="w-full space-y-2">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground flex items-center gap-1.5">
+                    <span className="text-muted-foreground flex items-center gap-1.5 font-medium">
                       <span className={`w-2 h-2 rounded-full ${scanState.faceDetected ? "bg-green-500" : "bg-red-500"} animate-pulse`} />
-                      {scanState.currentPhase === PHASE.DETECTION ? "Esperando rostro…" : "Evaluación en curso…"}
+                      {scanState.currentPhase === PHASE.DETECTION ? "Esperando rostro…" : "Evaluación en curso"}
                     </span>
-                    <span className="font-mono text-foreground font-medium">{Math.min(Math.round(scanState.totalProgress), 100)}%</span>
+                    <span className="font-mono text-foreground font-bold tabular-nums">{Math.min(Math.round(scanState.totalProgress), 100)}%</span>
                   </div>
-                  <Progress value={scanState.totalProgress} className="h-2" />
+                  <Progress value={scanState.totalProgress} className="h-2.5" />
 
-                  {/* Phase sub-bar */}
                   {phaseTotalFrames < Infinity && (
                     <div className="w-full h-1 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className="h-full bg-primary/50 rounded-full"
-                        style={{ width: `${phaseProgress}%`, transition: "width 0.3s ease" }}
-                      />
+                      <div className="h-full bg-primary/40 rounded-full transition-all duration-300" style={{ width: `${phaseProgress}%` }} />
                     </div>
                   )}
 
-                  <Button variant="ghost" size="sm" onClick={cancelScan} className="mt-1 text-xs text-muted-foreground w-full gap-1">
+                  <Button variant="ghost" size="sm" onClick={cancelScan} className="mt-1 text-xs text-muted-foreground/70 w-full gap-1 hover:text-destructive">
                     <X className="w-3 h-3" /> Cancelar escaneo
                   </Button>
                 </div>
@@ -901,56 +945,191 @@ export function VitalsScanner() {
 
             {/* ━━ ANALYZING ━━ */}
             {appPhase === "analyzing" && (
-              <div className="flex flex-col items-center py-12 px-6">
-                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4 animate-pulse">
-                  <Stethoscope className="w-8 h-8 text-primary" />
+              <div className="flex flex-col items-center py-16 px-6">
+                <div className="relative mb-6">
+                  <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                    <Stethoscope className="w-9 h-9 text-primary" />
+                  </div>
+                  <div className="absolute inset-0 rounded-full border-2 border-primary/30 animate-ping" />
                 </div>
-                <h3 className="font-semibold text-foreground mb-1 font-[family-name:var(--font-space-grotesk)]">Analizando datos</h3>
-                <p className="text-sm text-muted-foreground">Procesando {scanState.totalFramesSent} frames con IA…</p>
+                <h3 className="text-lg font-bold text-foreground mb-1 tracking-tight font-[family-name:var(--font-space-grotesk)]">Analizando datos clínicos</h3>
+                <p className="text-sm text-muted-foreground">Procesando <span className="font-mono font-semibold text-foreground">{scanState.totalFramesSent}</span> frames con IA…</p>
+                <div className="mt-4 w-48">
+                  <Progress value={75} className="h-1.5 animate-pulse" />
+                </div>
               </div>
             )}
 
             {/* ━━ COMPLETE ━━ */}
             {appPhase === "complete" && (
-              <div className="p-4 space-y-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-success" />
-                    <h3 className="font-semibold text-foreground font-[family-name:var(--font-space-grotesk)]">Resultados</h3>
+              <div className="p-5 space-y-4">
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-green-500/15 flex items-center justify-center">
+                      <CheckCircle2 className="w-5 h-5 text-green-500" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-foreground tracking-tight font-[family-name:var(--font-space-grotesk)]">Resultados</h3>
+                      <p className="text-[10px] text-muted-foreground">Evaluación completada</p>
+                    </div>
                   </div>
-                  <Button variant="outline" size="sm" onClick={doStartScan} className="gap-1 text-xs">
-                    <RotateCcw className="w-3 h-3" /> Nuevo Escaneo
+                  <Button variant="outline" size="sm" onClick={doStartScan} className="gap-1.5 text-xs font-semibold border-primary/20 hover:bg-primary/5">
+                    <RotateCcw className="w-3 h-3" /> Nuevo
                   </Button>
                 </div>
 
+                {/* Vitals grid */}
                 <div className="grid grid-cols-2 gap-3">
                   {results.map((result) => (
-                    <div key={result.label} className={`p-3 rounded-xl border ${statusColors[result.status]}`}>
-                      <div className="flex items-center justify-between mb-1">
-                        <result.icon className="w-4 h-4" />
-                        <div className="flex items-center gap-1">
+                    <div key={result.label} className={`p-3.5 rounded-2xl border backdrop-blur-sm transition-all hover:scale-[1.02] ${statusColors[result.status]}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="w-7 h-7 rounded-lg bg-current/10 flex items-center justify-center">
+                          <result.icon className="w-4 h-4" />
+                        </div>
+                        <div className="flex items-center gap-1 bg-current/5 rounded-full px-2 py-0.5">
                           <TrendIcon trend={result.trend} />
-                          <span className="text-[10px] font-medium">{statusLabels[result.status]}</span>
+                          <span className="text-[9px] font-bold uppercase tracking-wider">{statusLabels[result.status]}</span>
                         </div>
                       </div>
                       <div className="mt-1">
-                        <span className="text-2xl font-bold font-[family-name:var(--font-space-grotesk)]">{result.value}</span>
-                        <span className="text-xs ml-1">{result.unit}</span>
+                        <span className="text-3xl font-black tracking-tight font-[family-name:var(--font-space-grotesk)]">{result.value}</span>
+                        <span className="text-xs ml-1 opacity-70 font-medium">{result.unit}</span>
                       </div>
-                      <p className="text-[10px] mt-0.5 opacity-80">{result.label}</p>
-                      <p className="text-[8px] mt-0.5 opacity-50 italic">{result.method}</p>
+                      <p className="text-[10px] mt-1 font-semibold opacity-80">{result.label}</p>
+                      <p className="text-[8px] mt-0.5 opacity-40 italic font-medium">{result.method}</p>
                     </div>
                   ))}
                 </div>
 
+                {/* Warning if abnormal */}
                 {results.some((r) => r.status !== "normal") && (
-                  <div className="flex items-start gap-2 p-3 rounded-lg bg-warning/10 border border-warning/20">
+                  <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-warning/10 border border-warning/20">
                     <AlertCircle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
-                    <p className="text-xs text-warning-foreground leading-relaxed">
-                      Algunos valores están fuera del rango normal. Te recomendamos consultar a tu médico.
+                    <p className="text-xs text-warning-foreground leading-relaxed font-medium">
+                      Algunos valores están fuera del rango normal. Consulta a tu médico.
                     </p>
                   </div>
                 )}
+
+                {/* ══════ TELEMEDICINA — Opciones post-scan ══════ */}
+                <div className="border-t border-border/50 pt-4">
+                  <h4 className="text-sm font-bold text-foreground mb-3 flex items-center gap-2 font-[family-name:var(--font-space-grotesk)]">
+                    <Hospital className="w-4 h-4 text-primary" />
+                    ¿Deseas enviar a un centro médico?
+                  </h4>
+
+                  {!teleToken ? (
+                    <div className="space-y-2">
+                      {/* Telemedicine virtual */}
+                      <button
+                        onClick={() => requestTelemedicineToken("telemedicine")}
+                        disabled={teleSending}
+                        className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-primary/20 bg-primary/5 hover:bg-primary/10 transition-all text-left group disabled:opacity-50"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center shrink-0 group-hover:bg-primary/25 transition-colors">
+                          <Video className="w-5 h-5 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-foreground">Consulta Virtual</p>
+                          <p className="text-[10px] text-muted-foreground leading-snug">Genera un token para atención por telemedicina en minutos</p>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-primary/50 group-hover:text-primary transition-colors shrink-0" />
+                      </button>
+
+                      {/* Kiosk / QR */}
+                      <button
+                        onClick={() => requestTelemedicineToken("in_person_kiosk")}
+                        disabled={teleSending}
+                        className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-accent/20 bg-accent/5 hover:bg-accent/10 transition-all text-left group disabled:opacity-50"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-accent/15 flex items-center justify-center shrink-0 group-hover:bg-accent/25 transition-colors">
+                          <QrCode className="w-5 h-5 text-accent" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-foreground">Estación Presencial (QR)</p>
+                          <p className="text-[10px] text-muted-foreground leading-snug">Recibe un QR para escanear en estación de toma de signos vitales</p>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-accent/50 group-hover:text-accent transition-colors shrink-0" />
+                      </button>
+
+                      {teleSending && (
+                        <div className="flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground">
+                          <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                          Generando token…
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* ── Token generado ── */
+                    <div className="space-y-3">
+                      <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/5 to-accent/5 p-4 text-center">
+                        <div className="flex items-center justify-center gap-2 mb-2">
+                          <Shield className="w-4 h-4 text-primary" />
+                          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">
+                            {teleChoice === "telemedicine" ? "Token Telemedicina" : "Token Estación QR"}
+                          </span>
+                        </div>
+
+                        {/* Token code */}
+                        <div className="bg-card rounded-xl py-3 px-4 mb-3 border border-border/50">
+                          <p className="text-3xl font-black font-mono tracking-[0.3em] text-foreground">{teleToken}</p>
+                        </div>
+
+                        {/* QR Code */}
+                        {teleQrDataUrl && (
+                          <div className="flex justify-center mb-3">
+                            <div className="bg-white rounded-xl p-2 shadow-lg">
+                              <img src={teleQrDataUrl} alt="QR Code" className="w-48 h-48" />
+                            </div>
+                          </div>
+                        )}
+
+                        <p className="text-xs text-muted-foreground leading-relaxed mb-3">
+                          {teleChoice === "telemedicine"
+                            ? "Presenta este token en la plataforma de telemedicina para iniciar tu consulta virtual."
+                            : "Escanea este código QR en cualquier estación automatizada de toma de signos. Tu información clínica se cargará automáticamente."}
+                        </p>
+
+                        <div className="flex items-center justify-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1.5 text-xs"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(teleToken || "")
+                            }}
+                          >
+                            <Copy className="w-3 h-3" /> Copiar token
+                          </Button>
+                          {teleChoice === "kiosk" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-1.5 text-xs"
+                              onClick={() => {
+                                // Simular envío de correo
+                                alert(`Se enviará el QR al correo: ${(questionnaire as any)?.email || "no registrado"}`)
+                              }}
+                            >
+                              <Mail className="w-3 h-3" /> Enviar por correo
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-2 p-3 rounded-xl bg-muted/50 border border-border/50">
+                        <Clock className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          <strong>Token válido por 4 horas.</strong>{" "}
+                          {teleChoice === "telemedicine"
+                            ? "Un profesional de salud atenderá tu consulta virtual en los próximos minutos."
+                            : "Dirígete a la estación más cercana y escanea el QR. Los datos de tus signos vitales se cargarán automáticamente para tu atención."}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
             </ScanErrorBoundary>
@@ -959,16 +1138,23 @@ export function VitalsScanner() {
 
         {/* ═══ Triage ═══ */}
         {appPhase === "complete" && triage && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="font-[family-name:var(--font-space-grotesk)]">Hipótesis de tamizaje (IA)</CardTitle>
+          <Card className="border-0 shadow-xl bg-card/80 backdrop-blur-sm overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-primary/5 to-transparent pb-3">
+              <CardTitle className="flex items-center gap-2.5 text-base font-[family-name:var(--font-space-grotesk)]">
+                <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
+                  <Stethoscope className="w-4 h-4 text-primary" />
+                </div>
+                Hipótesis de Tamizaje (IA)
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {triage.error && <p className="text-sm text-destructive">Error: {triage.error}</p>}
+            <CardContent className="space-y-3 pt-2">
+              {triage.error && <p className="text-sm text-destructive font-medium">Error: {triage.error}</p>}
               {triage.red_flags?.is_red_flag && (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3">
-                  <p className="text-sm font-medium text-destructive">Banderas rojas</p>
-                  <ul className="mt-2 list-disc pl-5 text-sm text-muted-foreground">
+                <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3.5">
+                  <p className="text-sm font-bold text-destructive flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4" /> Banderas Rojas
+                  </p>
+                  <ul className="mt-2 list-disc pl-5 text-sm text-muted-foreground space-y-1">
                     {(triage.red_flags?.reasons || []).map((r: string, i: number) => (
                       <li key={i}>{r}</li>
                     ))}
@@ -976,132 +1162,80 @@ export function VitalsScanner() {
                 </div>
               )}
               <div>
-                <p className="text-sm font-medium">Top hipótesis</p>
-                <ul className="mt-2 space-y-2">
+                <p className="text-sm font-bold text-foreground mb-2">Top hipótesis</p>
+                <div className="space-y-2">
                   {(triage.differential || []).slice(0, 5).map((d: any, i: number) => (
-                    <li key={i} className="flex items-center justify-between rounded-lg border border-border p-3">
-                      <span className="text-sm text-foreground">{d.label}</span>
-                      <span className="text-sm font-semibold">{Math.round((d.probability || 0) * 100)}%</span>
-                    </li>
+                    <div key={i} className="flex items-center justify-between rounded-xl border border-border/50 p-3 hover:bg-muted/30 transition-colors">
+                      <span className="text-sm text-foreground font-medium">{d.label}</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div className="h-full bg-primary rounded-full" style={{ width: `${Math.round((d.probability || 0) * 100)}%` }} />
+                        </div>
+                        <span className="text-sm font-bold font-mono text-foreground w-8 text-right">{Math.round((d.probability || 0) * 100)}%</span>
+                      </div>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </div>
               {triage.explanation && (
-                <div className="rounded-lg border border-border bg-foreground/5 p-3">
-                  <p className="text-sm font-medium mb-2">Resumen (IA)</p>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{triage.explanation}</p>
+                <div className="rounded-xl border border-border/50 bg-muted/30 p-3.5">
+                  <p className="text-sm font-bold mb-2">Resumen (IA)</p>
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">{triage.explanation}</p>
                 </div>
               )}
-              <p className="text-xs text-muted-foreground">{triage.disclaimer}</p>
+              <p className="text-[10px] text-muted-foreground/60 italic leading-relaxed">{triage.disclaimer}</p>
             </CardContent>
           </Card>
         )}
 
         {/* ═══ Metodología (colapsable) ═══ */}
         {appPhase === "complete" && results.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2 cursor-pointer" onClick={() => setShowMethodology(!showMethodology)}>
+          <Card className="border-0 shadow-xl bg-card/80 backdrop-blur-sm overflow-hidden">
+            <CardHeader className="pb-2 cursor-pointer select-none hover:bg-muted/20 transition-colors" onClick={() => setShowMethodology(!showMethodology)}>
               <CardTitle className="flex items-center justify-between text-sm font-[family-name:var(--font-space-grotesk)]">
-                <div className="flex items-center gap-2">
-                  <FlaskConical className="w-4 h-4 text-primary" />
-                  Metodología Científica
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <FlaskConical className="w-3.5 h-3.5 text-primary" />
+                  </div>
+                  <span>Metodología Científica</span>
                 </div>
-                <span className="text-xs text-muted-foreground">{showMethodology ? "▲ Ocultar" : "▼ Ver detalle"}</span>
+                <span className={`text-xs text-muted-foreground transition-transform duration-300 ${showMethodology ? "rotate-180" : ""}`}>▼</span>
               </CardTitle>
             </CardHeader>
             {showMethodology && (
-              <CardContent className="space-y-3">
+              <CardContent className="space-y-3 pt-1">
                 <p className="text-xs text-muted-foreground leading-relaxed">
                   Cada parámetro se midió con técnicas de fotopletismografía remota (rPPG)
                   a partir de la señal óptica del rostro captada por la cámara del dispositivo.
                 </p>
 
-                {/* HR */}
-                <div className="rounded-lg border border-border p-3 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Heart className="w-4 h-4 text-red-500" />
-                    <span className="text-sm font-semibold text-foreground">Frecuencia Cardíaca</span>
+                {[
+                  { icon: Heart, color: "text-red-500", bg: "bg-red-500/10", title: "Frecuencia Cardíaca", desc: <><strong>CHROM</strong> (De Haan & Jeanne, 2013): señal crominante <em>S = 3R − 2G</em>, Welch PSD en 0.7–3.5 Hz, fusión de 3 estimadores (PSD + autocorrelación + conteo de picos).</> },
+                  { icon: Droplets, color: "text-blue-500", bg: "bg-blue-500/10", title: "SpO₂", desc: <><strong>Ley de Beer-Lambert</strong>: ratio-of-ratios dual R/B + R/G, calibraciones cuadráticas empíricas, fusión bayesiana con prior 97%.</> },
+                  { icon: Wind, color: "text-green-500", bg: "bg-green-500/10", title: "Frecuencia Respiratoria", desc: <><strong>Fusión 4 fuentes</strong>: RSA (arritmia sinusal), RIIV (variación intensidad), RIAV (variación amplitud), aleteo nasal perinasal. Votación concordante + prior bayesiano 16 rpm. Fase de respiración guiada para maximizar SNR.</> },
+                  { icon: ScanEye, color: "text-cyan-500", bg: "bg-cyan-500/10", title: "Análisis Ocular", desc: <><strong>Micro-tremor ocular</strong>: captura de micro-vibraciones del globo ocular que correlacionan con la presión intraocular y la pulsatilidad arterial retiniana. Validación cruzada de FC y detección de hipertensión ocular. Basado en Nyström et al. (2013).</> },
+                  { icon: Gauge, color: "text-purple-500", bg: "bg-purple-500/10", title: "Presión Arterial", desc: <><strong>PTT + Valsalva</strong>: estimación del tiempo de tránsito de pulso, morfología de onda rPPG + maniobra de Valsalva que genera variaciones hemodinámicas medibles. Regresión calibrada.</> },
+                  { icon: Thermometer, color: "text-orange-500", bg: "bg-orange-500/10", title: "Temperatura", desc: <><strong>Perfusión facial</strong>: correlación entre amplitud rPPG y vasodilatación/vasoconstricción termorreguladora. Estimación indirecta con corrección estadística poblacional. <span className="italic text-amber-600 dark:text-amber-400">Estimativa — usar termómetro certificado para precisión clínica.</span></> },
+                ].map((item, idx) => (
+                  <div key={idx} className="rounded-xl border border-border/50 p-3.5 space-y-1.5 hover:bg-muted/20 transition-colors">
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-7 h-7 rounded-lg ${item.bg} flex items-center justify-center`}>
+                        <item.icon className={`w-3.5 h-3.5 ${item.color}`} />
+                      </div>
+                      <span className="text-sm font-bold text-foreground">{item.title}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed pl-[38px]">{item.desc}</p>
                   </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    <strong>CHROM</strong> (De Haan & Jeanne, 2013): señal crominante <em>S = 3R − 2G</em>,
-                    Welch PSD en 0.7–3.5 Hz, fusión de 3 estimadores (PSD + autocorrelación + conteo de picos).
-                  </p>
-                </div>
+                ))}
 
-                {/* SpO2 */}
-                <div className="rounded-lg border border-border p-3 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Droplets className="w-4 h-4 text-blue-500" />
-                    <span className="text-sm font-semibold text-foreground">SpO₂</span>
+                <div className="rounded-xl border border-primary/20 bg-gradient-to-r from-primary/5 to-transparent p-3.5 space-y-1.5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <BookOpen className="w-3.5 h-3.5 text-primary" />
+                    </div>
+                    <span className="text-sm font-bold text-foreground">Protocolo de Medición</span>
                   </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    <strong>Ley de Beer-Lambert</strong>: ratio-of-ratios dual R/B + R/G,
-                    calibraciones cuadráticas empíricas, fusión bayesiana con prior 97%.
-                  </p>
-                </div>
-
-                {/* RR */}
-                <div className="rounded-lg border border-border p-3 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Wind className="w-4 h-4 text-green-500" />
-                    <span className="text-sm font-semibold text-foreground">Frecuencia Respiratoria</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    <strong>Fusión 4 fuentes</strong>: RSA (arritmia sinusal), RIIV (variación intensidad),
-                    RIAV (variación amplitud), aleteo nasal perinasal. Votación concordante + prior bayesiano 16 rpm.
-                    Fase de respiración guiada para maximizar SNR.
-                  </p>
-                </div>
-
-                {/* Ocular */}
-                <div className="rounded-lg border border-border p-3 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <ScanEye className="w-4 h-4 text-cyan-500" />
-                    <span className="text-sm font-semibold text-foreground">Análisis Ocular</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    <strong>Micro-tremor ocular</strong>: captura de micro-vibraciones del globo ocular
-                    que correlacionan con la presión intraocular y la pulsatilidad arterial retiniana.
-                    Sirve como validación cruzada de FC y detección de hipertensión ocular.
-                    Basado en trabajos de Nyström et al. (2013) sobre fijational eye movements.
-                  </p>
-                </div>
-
-                {/* BP */}
-                <div className="rounded-lg border border-border p-3 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Gauge className="w-4 h-4 text-purple-500" />
-                    <span className="text-sm font-semibold text-foreground">Presión Arterial</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    <strong>PTT + Valsalva</strong>: estimación del tiempo de tránsito de pulso,
-                    morfología de onda rPPG + maniobra de Valsalva (retener/soltar aliento)
-                    que genera variaciones hemodinámicas medibles. Regresión calibrada.
-                  </p>
-                </div>
-
-                {/* Temp */}
-                <div className="rounded-lg border border-border p-3 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Thermometer className="w-4 h-4 text-orange-500" />
-                    <span className="text-sm font-semibold text-foreground">Temperatura</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    <strong>Perfusión facial</strong>: correlación entre amplitud rPPG y vasodilatación/
-                    vasoconstricción termorreguladora. Estimación indirecta con corrección estadística poblacional.
-                    <span className="block mt-1 italic text-amber-600 dark:text-amber-400">
-                      Estimativa — usar termómetro certificado para precisión clínica.
-                    </span>
-                  </p>
-                </div>
-
-                {/* Protocol */}
-                <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <BookOpen className="w-4 h-4 text-primary" />
-                    <span className="text-sm font-semibold text-foreground">Protocolo de Medición</span>
-                  </div>
-                  <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-0.5">
+                  <ul className="text-xs text-muted-foreground list-disc pl-[42px] space-y-0.5">
                     <li><strong>Calibración (8s):</strong> Línea base de iluminación y tono de piel.</li>
                     <li><strong>Cardíaco (25s):</strong> Captura estática — FC y SpO₂.</li>
                     <li><strong>Ocular (15s):</strong> Acercamiento del ojo — micro-tremor para validación.</li>
@@ -1110,7 +1244,7 @@ export function VitalsScanner() {
                   </ul>
                 </div>
 
-                <p className="text-[10px] text-muted-foreground/70 leading-relaxed italic">
+                <p className="text-[10px] text-muted-foreground/50 leading-relaxed italic">
                   Descargo: medición orientativa, no sustituye diagnóstico médico profesional.
                   Basada en literatura científica publicada. La cámara del dispositivo tiene limitaciones
                   respecto a equipos médicos certificados.
@@ -1121,17 +1255,26 @@ export function VitalsScanner() {
         )}
 
         {/* ═══ History ═══ */}
-        <Button variant="outline" className="w-full" onClick={() => setShowHistory(!showHistory)}>
+        <Button
+          variant="outline"
+          className="w-full gap-2 border-border/50 shadow-sm hover:shadow-md transition-all font-semibold"
+          onClick={() => setShowHistory(!showHistory)}
+        >
           {showHistory ? "Ocultar Historial" : "Ver Historial de Mediciones"}
         </Button>
 
         {showHistory && (
-          <Card>
+          <Card className="border-0 shadow-xl bg-card/80 backdrop-blur-sm overflow-hidden">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-[family-name:var(--font-space-grotesk)]">Tendencias</CardTitle>
+              <CardTitle className="text-sm font-[family-name:var(--font-space-grotesk)] flex items-center gap-2">
+                <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center">
+                  <Activity className="w-3 h-3 text-primary" />
+                </div>
+                Tendencias
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="h-48">
+              <div className="h-48 -ml-2">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData}>
                     <XAxis dataKey="date" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
@@ -1139,10 +1282,11 @@ export function VitalsScanner() {
                     <Tooltip
                       contentStyle={{
                         fontSize: 12,
-                        borderRadius: 8,
+                        borderRadius: 12,
                         border: "1px solid var(--border)",
                         backgroundColor: "var(--card)",
                         color: "var(--card-foreground)",
+                        boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
                       }}
                     />
                     <Line type="monotone" dataKey="fc" stroke="var(--primary)" strokeWidth={2} dot={{ r: 3 }} name="FC (bpm)" />
@@ -1152,22 +1296,29 @@ export function VitalsScanner() {
                 </ResponsiveContainer>
               </div>
 
-              <div className="mt-4 space-y-2">
+              <div className="mt-4 space-y-1.5">
                 {mockVitalsHistory.map((v, i) => (
-                  <div key={i} className="flex items-center justify-between text-xs p-2 rounded-lg bg-muted/50">
-                    <span className="text-muted-foreground">
+                  <div key={i} className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-muted/40 border border-border/30 hover:bg-muted/60 transition-colors">
+                    <span className="text-muted-foreground font-medium">
                       {v.timestamp.toLocaleDateString("es", { day: "numeric", month: "short", year: "numeric" })}
                     </span>
                     <div className="flex items-center gap-3">
-                      <span className="text-foreground"><Heart className="w-3 h-3 inline text-primary mr-0.5" />{v.heartRate}</span>
-                      <span className="text-foreground"><Droplets className="w-3 h-3 inline text-accent mr-0.5" />{v.spo2}%</span>
-                      <span className="text-foreground"><Wind className="w-3 h-3 inline text-chart-4 mr-0.5" />{v.respiratoryRate}</span>
+                      <span className="text-foreground font-semibold"><Heart className="w-3 h-3 inline text-primary mr-0.5" />{v.heartRate}</span>
+                      <span className="text-foreground font-semibold"><Droplets className="w-3 h-3 inline text-accent mr-0.5" />{v.spo2}%</span>
+                      <span className="text-foreground font-semibold"><Wind className="w-3 h-3 inline text-chart-4 mr-0.5" />{v.respiratoryRate}</span>
                     </div>
                   </div>
                 ))}
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {/* Footer branding */}
+        {appPhase === "idle" && (
+          <div className="text-center py-4">
+            <p className="text-[10px] text-muted-foreground/40 font-medium tracking-wider uppercase">Medilink · Signos Vitales con IA</p>
+          </div>
         )}
       </main>
 

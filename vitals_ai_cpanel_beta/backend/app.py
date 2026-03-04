@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+from datetime import datetime
 import json
 
 from config import settings
@@ -12,7 +13,7 @@ from ai.llm_client import generate_explanation
 from ai.scan_session import create_session, add_frame, finish_session, get_session_info, destroy_session
 
 from db.session import db_session
-from db.models import Base, TriageAssessment
+from db.models import Base, TriageAssessment, TelemedicineToken
 
 load_dotenv()
 
@@ -162,6 +163,162 @@ def scan_status(session_id: str):
     if not info:
         return jsonify({'ok': False, 'error': 'Sesión no encontrada'}), 404
     return jsonify(info)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Endpoints Telemedicina — Tokens de atención post-escaneo
+# ═══════════════════════════════════════════════════════════════════
+
+import string
+import random
+from datetime import timedelta
+
+def _generate_token(length=8):
+    """Genera un token alfanumérico legible (sin caracteres confusos)."""
+    chars = string.ascii_uppercase.replace('O', '').replace('I', '').replace('L', '') + '23456789'
+    return ''.join(random.choices(chars, k=length))
+
+
+@app.post('/api/v1/telemedicine/token')
+def create_telemedicine_token():
+    """
+    Genera un token de atención (telemedicina virtual o presencial via QR).
+    Body: {
+        patient_name, patient_email, patient_id,
+        vitals, triage, questionnaire,
+        attention_type: "telemedicine" | "in_person_kiosk",
+        assessment_id
+    }
+    """
+    payload = request.get_json(force=True)
+
+    patient_name = payload.get('patient_name', '')
+    patient_email = payload.get('patient_email', '')
+    patient_id = payload.get('patient_id', '')
+    vitals = payload.get('vitals', {})
+    triage_data = payload.get('triage', {})
+    questionnaire = payload.get('questionnaire', {})
+    attention_type = payload.get('attention_type', 'telemedicine')
+    assessment_id = payload.get('assessment_id')
+
+    # Determinar prioridad basada en triage
+    priority = 'normal'
+    red_flags = triage_data.get('red_flags', {})
+    if red_flags.get('is_red_flag'):
+        priority = 'critical'
+    elif any(v and isinstance(v, dict) and v.get('status') == 'warning'
+             for v in (vitals if isinstance(vitals, list) else [vitals])):
+        priority = 'urgent'
+
+    # Generar token único
+    token = _generate_token()
+
+    try:
+        with next(db_session()) as s:
+            row = TelemedicineToken(
+                token=token,
+                patient_name=patient_name,
+                patient_email=patient_email,
+                patient_id=patient_id,
+                vitals_json=json.dumps(vitals, ensure_ascii=False),
+                triage_json=json.dumps(triage_data, ensure_ascii=False),
+                questionnaire_json=json.dumps(questionnaire, ensure_ascii=False),
+                attention_type=attention_type,
+                priority=priority,
+                assessment_id=assessment_id,
+                expires_at=datetime.utcnow() + timedelta(hours=4),
+            )
+            s.add(row)
+            s.flush()
+            token_id = row.id
+    except Exception as e:
+        # Fallback: devolver token sin persistencia
+        token_id = None
+
+    return jsonify({
+        'ok': True,
+        'token': token,
+        'token_id': token_id,
+        'attention_type': attention_type,
+        'priority': priority,
+        'expires_in_hours': 4,
+        'qr_data': json.dumps({
+            'token': token,
+            'type': attention_type,
+            'patient': patient_name,
+            'priority': priority,
+            'vitals': vitals,
+            'created': datetime.utcnow().isoformat(),
+        }, ensure_ascii=False),
+    })
+
+
+@app.get('/api/v1/telemedicine/token/<token>')
+def get_telemedicine_token(token: str):
+    """
+    Consulta un token por su código. 
+    Usado por: plataforma de telemedicina, estación de kiosk.
+    """
+    try:
+        with next(db_session()) as s:
+            row = s.query(TelemedicineToken).filter_by(token=token).first()
+            if not row:
+                return jsonify({'ok': False, 'error': 'Token no encontrado'}), 404
+
+            # Verificar expiración
+            if row.expires_at and row.expires_at < datetime.utcnow():
+                return jsonify({'ok': False, 'error': 'Token expirado'}), 410
+
+            return jsonify({
+                'ok': True,
+                'token': row.token,
+                'patient_name': row.patient_name,
+                'patient_email': row.patient_email,
+                'patient_id': row.patient_id,
+                'vitals': json.loads(row.vitals_json) if row.vitals_json else {},
+                'triage': json.loads(row.triage_json) if row.triage_json else {},
+                'questionnaire': json.loads(row.questionnaire_json) if row.questionnaire_json else {},
+                'attention_type': row.attention_type,
+                'priority': row.priority,
+                'status': row.status,
+                'created_at': row.created_at.isoformat() if row.created_at else None,
+                'expires_at': row.expires_at.isoformat() if row.expires_at else None,
+            })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.get('/api/v1/telemedicine/queue')
+def telemedicine_queue():
+    """
+    Lista los tokens pendientes para la plataforma de telemedicina.
+    La vista de la plataforma llama a este endpoint para mostrar la cola.
+    """
+    try:
+        with next(db_session()) as s:
+            rows = (s.query(TelemedicineToken)
+                     .filter(TelemedicineToken.status.in_(['pending', 'in_progress']))
+                     .order_by(
+                         # Prioridad: critical > urgent > normal
+                         TelemedicineToken.priority.desc(),
+                         TelemedicineToken.created_at.asc()
+                     )
+                     .limit(50)
+                     .all())
+            queue = []
+            for row in rows:
+                queue.append({
+                    'token': row.token,
+                    'patient_name': row.patient_name,
+                    'attention_type': row.attention_type,
+                    'priority': row.priority,
+                    'status': row.status,
+                    'vitals': json.loads(row.vitals_json) if row.vitals_json else {},
+                    'created_at': row.created_at.isoformat() if row.created_at else None,
+                })
+            return jsonify({'ok': True, 'queue': queue, 'total': len(queue)})
+    except Exception as e:
+        return jsonify({'ok': True, 'queue': [], 'total': 0})
 
 
 if __name__ == '__main__':

@@ -17,9 +17,15 @@ class Settings:
 
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
+        # If explicit DB_URL env var is set, use it (e.g. for SQLite in dev)
+        explicit = os.getenv('DATABASE_URL', '')
+        if explicit:
+            return explicit
         # mysql+pymysql://user:pass@host:port/db?charset=utf8mb4
         if not (self.DB_NAME and self.DB_USER):
-            return ''
+            # Fallback to local SQLite for development
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            return f"sqlite:///{os.path.join(base_dir, 'vitals_dev.db')}"
         return (
             f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?charset=utf8mb4"
