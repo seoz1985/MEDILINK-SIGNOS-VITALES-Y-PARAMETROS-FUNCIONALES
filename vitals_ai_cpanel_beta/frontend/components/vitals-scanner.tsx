@@ -138,10 +138,14 @@ class ScanErrorBoundary extends React.Component<
 }
 
 export function VitalsScanner() {
-  const { addVitals, lockNavigation, unlockNavigation } = useApp()
-  const [appPhase, setAppPhase] = useState<AppPhase>("questionnaire")
+  const { addVitals, lockNavigation, unlockNavigation, onboardingData } = useApp()
+  // Si hay onboardingData del wizard previo, saltamos cuestionario e iniciamos en "idle"
+  const initialPhase: AppPhase = onboardingData ? "idle" : "questionnaire"
+  const [appPhase, setAppPhase] = useState<AppPhase>(initialPhase)
   const [results, setResults] = useState<VitalResult[]>([])
-  const [questionnaire, setQuestionnaire] = useState<Questionnaire | null>(null)
+  const [questionnaire, setQuestionnaire] = useState<Questionnaire | null>(
+    onboardingData ? (onboardingData.questionnaire as Questionnaire) : null
+  )
   const [triage, setTriage] = useState<any>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [showMethodology, setShowMethodology] = useState(false)
@@ -149,7 +153,7 @@ export function VitalsScanner() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const analyzingRef = useRef(false)
-  const appPhaseRef = useRef<AppPhase>("questionnaire")
+  const appPhaseRef = useRef<AppPhase>(initialPhase)
   appPhaseRef.current = appPhase
 
   // ── Telemedicina state ──
@@ -476,10 +480,11 @@ export function VitalsScanner() {
     setTeleSending(true)
     setTeleChoice(type === "telemedicine" ? "telemedicine" : "kiosk")
     try {
+      const patientInfo = onboardingData?.patient
       const res: any = await apiPost("/api/v1/telemedicine/token", {
-        patient_name: (questionnaire as any)?.name || "Paciente",
-        patient_email: (questionnaire as any)?.email || "",
-        patient_id: "",
+        patient_name: patientInfo?.patient_name || (questionnaire as any)?.name || "Paciente",
+        patient_email: patientInfo?.patient_email || (questionnaire as any)?.email || "",
+        patient_id: patientInfo?.patient_document_number || "",
         vitals: lastVitals,
         triage: triage,
         questionnaire,
@@ -504,7 +509,7 @@ export function VitalsScanner() {
     } finally {
       setTeleSending(false)
     }
-  }, [questionnaire, lastVitals, triage])
+  }, [questionnaire, lastVitals, triage, onboardingData])
 
   // ── Helpers de UI ───────────────────────────────────────────
   const getStatus = (type: string, value: number): "normal" | "warning" | "critical" => {
@@ -1109,7 +1114,7 @@ export function VitalsScanner() {
                               className="gap-1.5 text-xs"
                               onClick={() => {
                                 // Simular envío de correo
-                                alert(`Se enviará el QR al correo: ${(questionnaire as any)?.email || "no registrado"}`)
+                                alert(`Se enviará el QR al correo: ${onboardingData?.patient?.patient_email || (questionnaire as any)?.email || "no registrado"}`)
                               }}
                             >
                               <Mail className="w-3 h-3" /> Enviar por correo

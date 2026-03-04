@@ -7,6 +7,7 @@ import { LandingPage } from "@/components/landing-page"
 import { LoginScreen, RegisterScreen } from "@/components/auth-screens"
 import { PatientDashboard } from "@/components/patient-dashboard"
 import { VitalsScanner } from "@/components/vitals-scanner"
+import { PatientOnboarding } from "@/components/patient-onboarding"
 import { AppHeader } from "@/components/app-header"
 import { BottomNav } from "@/components/bottom-nav"
 
@@ -19,6 +20,7 @@ function AppRouter() {
   if (currentView === "register") return <RegisterScreen />
 
   // Componentes que manejan su propio layout completo (header + nav incluidos)
+  if (currentView === "patient-onboarding") return <PatientOnboarding />
   if (currentView === "patient-vitals") return <VitalsScanner />
   if (currentView === "patient-dashboard") return <PatientDashboard />
 

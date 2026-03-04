@@ -21,6 +21,7 @@ export type AppView =
   | "login"
   | "register"
   | "patient-dashboard"
+  | "patient-onboarding"
   | "patient-vitals"
   | "patient-history"
   | "patient-appointments"
@@ -87,6 +88,9 @@ export interface Patient {
   lastVisit: string
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type OnboardingData = any  // Full type in patient-onboarding.tsx
+
 interface AppContextType {
   role: UserRole
   setRole: (role: UserRole) => void
@@ -102,6 +106,9 @@ interface AppContextType {
   lockNavigation: () => void
   unlockNavigation: () => void
   navigationLocked: boolean
+  /** Onboarding data collected before vitals scan */
+  onboardingData: OnboardingData | null
+  setOnboardingData: (data: OnboardingData | null) => void
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined)
@@ -113,6 +120,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null)
   const [vitalsHistory, setVitalsHistory] = useState<VitalSigns[]>([])
   const [navigationLocked, setNavigationLocked] = useState(false)
+  const [onboardingData, setOnboardingData] = useState<OnboardingData | null>(null)
   const navLockedRef = useRef(false) // ref para acceso síncrono inmediato
 
   // Persistir rol y vista en sessionStorage
@@ -166,6 +174,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         lockNavigation,
         unlockNavigation,
         navigationLocked,
+        onboardingData,
+        setOnboardingData,
       }}
     >
       {children}

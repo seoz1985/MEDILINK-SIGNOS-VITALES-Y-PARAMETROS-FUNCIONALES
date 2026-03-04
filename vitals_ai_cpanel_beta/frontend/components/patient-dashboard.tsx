@@ -34,7 +34,7 @@ export function PatientDashboard() {
         {/* Quick Actions */}
         <div className="grid grid-cols-2 gap-3">
           <button
-            onClick={() => navigate("patient-vitals")}
+            onClick={() => navigate("patient-onboarding")}
             className="flex flex-col items-center gap-2 p-4 rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
           >
             <Camera className="w-6 h-6" />
