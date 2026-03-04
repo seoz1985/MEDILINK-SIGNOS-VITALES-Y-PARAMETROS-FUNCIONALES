@@ -74,17 +74,6 @@ export function LandingPage() {
               >
                 Soy Paciente <ArrowRight className="w-4 h-4" />
               </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="w-full sm:w-auto gap-2.5 px-8 text-base font-semibold border-border/50 hover:bg-muted/50"
-                onClick={() => {
-                  setRole("doctor")
-                  navigate("register")
-                }}
-              >
-                <Stethoscope className="w-4 h-4" /> Soy Médico
-              </Button>
             </div>
 
             {/* Trust badges */}
