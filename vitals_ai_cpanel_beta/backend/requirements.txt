@@ -1,0 +1,12 @@
+Flask==3.0.2
+flask-cors==4.0.0
+python-dotenv==1.0.1
+SQLAlchemy==2.0.29
+PyMySQL==1.1.0
+cryptography==42.0.5
+joblib==1.4.2
+scikit-learn==1.4.2
+requests==2.32.3
+numpy==1.26.4
+opencv-python-headless==4.9.0.80
+scipy==1.13.0
