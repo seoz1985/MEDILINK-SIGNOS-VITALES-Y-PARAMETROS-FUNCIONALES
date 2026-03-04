@@ -215,7 +215,7 @@ export function LandingPage() {
         </div>
       </section>
 
-      {/* ════════ STATS BAR ════════ */}
+      {/* ════════ STATS BAR (oculto por ahora) ════════
       <section className="relative z-10 py-6 border-y border-white/5 bg-white/[0.02] backdrop-blur-sm">
         <div className="max-w-6xl mx-auto px-5 grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-0">
           {[
@@ -236,6 +236,7 @@ export function LandingPage() {
           ))}
         </div>
       </section>
+      */}
 
       {/* ════════ AI ASSISTANT CTA ════════ */}
       <section className="relative z-10 py-20 md:py-28">
