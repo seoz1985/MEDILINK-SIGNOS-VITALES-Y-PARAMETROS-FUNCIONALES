@@ -7,32 +7,69 @@ import { AlertCircle } from "lucide-react"
 interface ErrorBoundaryState {
   hasError: boolean
   error: Error | null
+  autoRetries: number
 }
 
 /**
  * Error Boundary que atrapa errores de render en hijos.
- * Muestra una UI de recuperación en lugar de destruir el árbol
- * de componentes (que causaría perder todo el estado de la app).
+ * 
+ * BLINDAJE: Auto-recuperación silenciosa.
+ * Si un error transitorio ocurre (p.ej. durante un re-render del scan),
+ * intenta auto-reset hasta 3 veces antes de mostrar la pantalla de error.
+ * Esto evita que un error de render instantáneo desmonte VitalsScanner
+ * y pierda todo el estado del escaneo.
  */
 export class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },
   ErrorBoundaryState
 > {
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private static MAX_AUTO_RETRIES = 3
+  private static RETRY_DELAY_MS = 300
+
   constructor(props: { children: React.ReactNode }) {
     super(props)
-    this.state = { hasError: false, error: null }
+    this.state = { hasError: false, error: null, autoRetries: 0 }
   }
 
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { hasError: true, error }
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error("[ErrorBoundary]", error, info.componentStack)
+    console.error("[ErrorBoundary] Error atrapado:", error.message)
+    console.error("[ErrorBoundary] Stack:", info.componentStack)
+
+    // Auto-recuperación silenciosa: intentar re-render tras breve delay
+    if (this.state.autoRetries < AppErrorBoundary.MAX_AUTO_RETRIES) {
+      const delay = AppErrorBoundary.RETRY_DELAY_MS * (this.state.autoRetries + 1)
+      console.warn(`[ErrorBoundary] Auto-retry #${this.state.autoRetries + 1} en ${delay}ms`)
+      this.retryTimer = setTimeout(() => {
+        this.setState((prev) => ({
+          hasError: false,
+          error: null,
+          autoRetries: prev.autoRetries + 1,
+        }))
+      }, delay)
+    }
+  }
+
+  componentWillUnmount() {
+    if (this.retryTimer) clearTimeout(this.retryTimer)
   }
 
   render() {
     if (this.state.hasError) {
+      // Si aún quedan auto-reintentos, mostrar indicador mínimo (NO la pantalla de error)
+      if (this.state.autoRetries < AppErrorBoundary.MAX_AUTO_RETRIES) {
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-background">
+            <p className="text-sm text-muted-foreground animate-pulse">Recuperando…</p>
+          </div>
+        )
+      }
+
+      // Auto-reintentos agotados: mostrar pantalla de error con botón manual
       return (
         <div className="min-h-screen flex items-center justify-center bg-background p-6">
           <div className="max-w-sm text-center space-y-4">
@@ -50,7 +87,7 @@ export class AppErrorBoundary extends React.Component<
             </p>
             <Button
               onClick={() => {
-                this.setState({ hasError: false, error: null })
+                this.setState({ hasError: false, error: null, autoRetries: 0 })
               }}
             >
               Reintentar

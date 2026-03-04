@@ -33,15 +33,15 @@ export function BottomNav({ disabled }: { disabled?: boolean }) {
   const { role, currentView, navigate } = useApp()
   const items = role === "doctor" ? doctorNav : patientNav
 
-  // ── BLINDAJE NUCLEAR: durante escaneo, NO renderizar la nav en absoluto ──
-  // pointer-events-none NO es suficiente en todos los navegadores móviles.
-  // La única forma 100% segura es NO tener los botones en el DOM.
+  // ── BLINDAJE NUCLEAR: durante escaneo, ELIMINAR toda la barra de navegación ──
+  // No renderizar NINGÚN botón en el DOM. Cero posibilidad de toque accidental.
+  // Solo mantener un spacer para que el layout no salte.
   if (disabled) {
     return (
-      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-md safe-area-inset-bottom opacity-30" aria-hidden="true" inert="">
-        <div className="max-w-lg mx-auto flex items-center justify-around px-2 py-2">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-md safe-area-inset-bottom" style={{ pointerEvents: "none" }}>
+        <div className="max-w-lg mx-auto flex items-center justify-around px-2 py-2 opacity-20">
           {items.map((item) => (
-            <div key={item.view} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-muted-foreground/50">
+            <div key={item.view} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-muted-foreground/30">
               <item.icon className="w-5 h-5" />
               <span className="text-[10px] font-medium">{item.label}</span>
             </div>

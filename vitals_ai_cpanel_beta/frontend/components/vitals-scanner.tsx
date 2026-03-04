@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import React, { useState, useEffect, useCallback, useRef } from "react"
 import { useApp, type VitalSigns } from "@/lib/app-context"
 import { AppHeader } from "@/components/app-header"
 import { BottomNav } from "@/components/bottom-nav"
@@ -76,6 +76,57 @@ const PHASE_DESC: Record<number, string> = {
   [PHASE.COMPUTING]: "Calculando resultados",
 }
 
+/* ═══════════════════════════════════════════════════════════════ */
+/*  Error Boundary INTERNO — atrapa errores de render en el UI    */
+/*  del escaneo SIN desmontar VitalsScanner (preserva estado).    */
+/*  Auto-recupera tras 200ms, máximo 5 reintentos.                */
+/* ═══════════════════════════════════════════════════════════════ */
+class ScanErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  private retryCount = 0
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private static MAX_RETRIES = 5
+
+  constructor(props: { children: React.ReactNode }) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("[ScanErrorBoundary] Error atrapado (NO desmonta VitalsScanner):", error.message)
+    // Auto-recuperar tras breve delay
+    if (this.retryCount < ScanErrorBoundary.MAX_RETRIES) {
+      this.retryCount++
+      this.retryTimer = setTimeout(() => {
+        this.setState({ hasError: false })
+      }, 200)
+    }
+  }
+
+  componentWillUnmount() {
+    if (this.retryTimer) clearTimeout(this.retryTimer)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      // Mostrar indicador mínimo mientras se auto-recupera
+      // VitalsScanner sigue montado → todo el estado del scan se preserva
+      return (
+        <div className="flex items-center justify-center py-8">
+          <p className="text-sm text-muted-foreground animate-pulse">Recuperando vista…</p>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 export function VitalsScanner() {
   const { addVitals, lockNavigation, unlockNavigation } = useApp()
   const [appPhase, setAppPhase] = useState<AppPhase>("questionnaire")
@@ -90,6 +141,25 @@ export function VitalsScanner() {
   const analyzingRef = useRef(false)
   const appPhaseRef = useRef<AppPhase>("questionnaire")
   appPhaseRef.current = appPhase
+
+  // ── Guard nuclear: impide retroceso a questionnaire/idle durante escaneo ──
+  const scanActiveRef = useRef(false)
+  const safeSetAppPhase = useCallback((phase: AppPhase) => {
+    // GUARDIA: si el escaneo está activo, NUNCA retroceder
+    if (scanActiveRef.current && (phase === "questionnaire" || phase === "idle")) {
+      console.warn(`[Scan] BLOCKED retroceso a "${phase}" — escaneo activo`)
+      return
+    }
+    // Activar guardia al entrar en scanning
+    if (phase === "scanning" || phase === "analyzing") {
+      scanActiveRef.current = true
+    }
+    // Desactivar guardia al completar
+    if (phase === "complete") {
+      scanActiveRef.current = false
+    }
+    setAppPhase(phase)
+  }, [])
 
   // rPPG Hook
   const rppg = useRPPGScan()
@@ -157,7 +227,7 @@ export function VitalsScanner() {
       setResults([])
       setTriage(null)
       setCameraError(null)
-      setAppPhase("scanning")
+      safeSetAppPhase("scanning")
 
       // Iniciar cámara (con reintento)
       let ok = await startCamera()
@@ -229,7 +299,7 @@ export function VitalsScanner() {
     if (analyzingRef.current) return
     analyzingRef.current = true
 
-    setAppPhase("analyzing")
+    safeSetAppPhase("analyzing")
 
     ;(async () => {
       try {
@@ -367,6 +437,7 @@ export function VitalsScanner() {
     rppgRef.current.cancelScan()
     stopCamera()
     analyzingRef.current = false
+    scanActiveRef.current = false  // Desactivar guardia ANTES de retroceder
     unlockNavigation()
     setAppPhase(questionnaire ? "idle" : "questionnaire")
   }, [questionnaire, stopCamera, unlockNavigation])
@@ -522,6 +593,7 @@ export function VitalsScanner() {
         {/* ═══ Scanner Card ═══ */}
         <Card className="overflow-hidden">
           <CardContent className="p-0">
+            <ScanErrorBoundary>
 
             {/* ━━ IDLE ━━ */}
             {appPhase === "idle" && (
@@ -822,6 +894,7 @@ export function VitalsScanner() {
                 )}
               </div>
             )}
+            </ScanErrorBoundary>
           </CardContent>
         </Card>
 

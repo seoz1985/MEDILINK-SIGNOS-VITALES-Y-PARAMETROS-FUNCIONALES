@@ -25,7 +25,7 @@ export function AppHeader({ title, subtitle, scanLocked }: AppHeaderProps) {
   // cualquier posibilidad de navegación accidental.
   if (scanLocked) {
     return (
-      <header className="sticky top-0 z-40 border-b border-border bg-card/95 backdrop-blur-md" aria-hidden="true" inert="">
+      <header className="sticky top-0 z-40 border-b border-border bg-card/95 backdrop-blur-md" style={{ pointerEvents: "none", userSelect: "none" }}>
         <div className="max-w-lg mx-auto flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
