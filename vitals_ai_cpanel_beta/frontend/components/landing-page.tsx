@@ -186,7 +186,7 @@ export function LandingPage() {
           <div className="grid md:grid-cols-3 gap-10">
             {[
               { step: "01", title: "Regístrate", description: "Crea tu perfil como paciente o médico en menos de 2 minutos. Acepta el consentimiento informado." },
-              { step: "02", title: "Evalúa tus signos", description: "Usa la cámara de tu celular para registrar tus parámetros funcionales con IA. Tu asistente Virma te guiará." },
+              { step: "02", title: "Evalúa tus signos", description: "Usa la cámara de tu celular para registrar tus parámetros funcionales con IA. Tu asistente virtual te guiará." },
               { step: "03", title: "Conecta con tu médico", description: "Genera un token de telemedicina o un QR para atención presencial desde cualquier estación." },
             ].map((item) => (
               <div key={item.step} className="text-center">
@@ -207,10 +207,10 @@ export function LandingPage() {
           <div className="p-8 md:p-12 rounded-3xl bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border border-primary/10 shadow-2xl shadow-primary/5">
             <Bot className="w-12 h-12 text-primary mx-auto mb-4" />
             <h2 className="text-2xl md:text-3xl font-black text-foreground font-[family-name:var(--font-space-grotesk)] tracking-tight mb-3">
-              Conoce a Virma, tu asistente de salud
+              Tu asistente de salud con IA
             </h2>
             <p className="text-muted-foreground max-w-lg mx-auto leading-relaxed mb-6">
-              Nuestra asistente virtual te guiará paso a paso por todo el proceso de evaluación,
+              Nuestro asistente con inteligencia artificial te guiará paso a paso por todo el proceso de evaluación,
               desde el consentimiento informado hasta la generación de tu reporte clínico con IA.
             </p>
             <Button

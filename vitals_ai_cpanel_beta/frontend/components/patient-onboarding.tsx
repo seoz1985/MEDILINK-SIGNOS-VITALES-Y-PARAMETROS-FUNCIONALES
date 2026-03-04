@@ -172,9 +172,9 @@ function VoiceMicButton({
 /*  MAIN COMPONENT                                                */
 /* ═══════════════════════════════════════════════════════════════ */
 
-/** Messages Virma speaks at each step */
+/** Messages the AI assistant speaks at each step */
 const STEP_VOICE_MESSAGES: Record<number, string> = {
-  0: "¡Hola! Soy Virma, tu asistente virtual de salud. Te acompañaré en el proceso de evaluación de parámetros funcionales mediante nuestra tecnología de inteligencia artificial. El proceso toma solo 2 a 3 minutos. ¿Comenzamos?",
+  0: "¡Hola! Soy tu asistente virtual de salud de VitaLink. Te acompañaré en el proceso de evaluación de parámetros funcionales mediante nuestra tecnología de inteligencia artificial. El proceso toma solo 2 a 3 minutos. ¿Comenzamos?",
   1: "Antes de continuar, es necesario que leas y aceptes nuestro consentimiento informado. Por favor lee el documento completo desplazándote hasta el final.",
   2: "Ahora necesito tus datos de identificación. Puedes escribir o usar el micrófono para dictar. ¿Realizas esta evaluación para ti mismo o para otra persona como acudiente?",
   3: "Déjame explicarte en qué consiste el procedimiento. Esta evaluación utiliza inteligencia artificial y la cámara de tu celular para estimar parámetros funcionales. No es una toma de signos vitales convencional. Los resultados son probabilísticos y deben correlacionarse con atención médica profesional.",
@@ -209,7 +209,7 @@ export function PatientOnboarding() {
   } = useSpeech({
     lang: "es-CO",
     rate: 0.95,
-    pitch: 1.05,
+    pitch: 1.0,
     onResult: (transcript, isFinal) => {
       if (!voiceTarget || !isFinal) return
       // Route dictated text to the correct field
@@ -249,7 +249,7 @@ export function PatientOnboarding() {
     setTyping(true)
     const t = setTimeout(() => {
       setTyping(false)
-      // Auto-speak Virma's message for this step
+      // Auto-speak assistant message for this step
       const msg = STEP_VOICE_MESSAGES[step]
       if (msg) speak(msg)
     }, 800 + Math.random() * 600)
@@ -394,7 +394,7 @@ export function PatientOnboarding() {
             <AssistantBubble typing={typing}>
               <div className="space-y-3">
                 <p className="font-semibold text-base">
-                  ¡Hola! 👋 Soy <span className="text-primary">Virma</span>, tu asistente virtual de salud.
+                  ¡Hola! 👋 Soy tu <span className="text-primary">Asistente de Salud IA</span> de VitaLink.
                 </p>
                 <p>
                   Te acompañaré en el proceso de <strong>evaluación de parámetros funcionales</strong> mediante nuestra tecnología de inteligencia artificial.

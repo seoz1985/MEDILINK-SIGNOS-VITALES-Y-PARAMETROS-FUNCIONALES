@@ -166,8 +166,8 @@ export function VitalsScanner() {
   const [teleChoice, setTeleChoice] = useState<"none" | "telemedicine" | "kiosk">("none")
   const [lastVitals, setLastVitals] = useState<any>(null)
 
-  // ── Virma voice (TTS) for scanner guidance ──
-  const { speak: virmaSpeak, stopSpeaking: virmaStop, isSpeaking: virmaIsSpeaking, muted: virmaMuted, toggleMute: virmaToggleMute, ttsSupported: virmaTTS } = useSpeech({ lang: "es-CO", rate: 0.95, pitch: 1.05 })
+  // ── AI assistant voice (TTS) for scanner guidance ──
+  const { speak: aiSpeak, stopSpeaking: aiStop, isSpeaking: aiIsSpeaking, muted: aiMuted, toggleMute: aiToggleMute, ttsSupported: aiTTS } = useSpeech({ lang: "es-CO", rate: 0.95, pitch: 1.0 })
   const prevPhaseRef = useRef<AppPhase>(initialPhase)
   useEffect(() => {
     if (prevPhaseRef.current === appPhase) return
@@ -179,7 +179,7 @@ export function VitalsScanner() {
       complete: "Análisis terminado. Puedes ver tus resultados a continuación. Recuerda que estos valores son estimaciones probabilísticas y deben ser correlacionados con atención médica profesional.",
     }
     const msg = msgs[appPhase]
-    if (msg) virmaSpeak(msg)
+    if (msg) aiSpeak(msg)
   }, [appPhase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Guard nuclear: impide retroceso a questionnaire/idle durante escaneo ──
@@ -714,30 +714,30 @@ export function VitalsScanner() {
     <div className={`min-h-screen bg-gradient-to-b from-background via-background to-muted/30 ${scanLocked ? 'pb-0' : 'pb-20'}`}>
       <AppHeader title="Signos Vitales" subtitle="Monitoreo Clínico con IA" scanLocked={scanLocked} />
 
-      {/* Virma voice bar */}
-      {virmaTTS && (
+      {/* AI assistant voice bar */}
+      {aiTTS && (
         <div className="max-w-lg mx-auto px-4 pt-2">
           <div className="flex items-center justify-between p-2 rounded-xl bg-muted/50 border border-border/30">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              {virmaIsSpeaking ? (
+              {aiIsSpeaking ? (
                 <>
                   <div className="flex items-center gap-0.5">
                     {[0,1,2,3].map(i => (
                       <div key={i} className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: `${6 + Math.random() * 6}px`, animationDelay: `${i*80}ms`, animationDuration: "0.5s" }} />
                     ))}
                   </div>
-                  <span className="font-medium text-primary">Virma está hablando...</span>
+                  <span className="font-medium text-primary">Asistente hablando...</span>
                 </>
               ) : (
-                <span className="font-medium">🤖 Virma — Asistente de voz</span>
+                <span className="font-medium">🤖 Asistente IA — VitaLink</span>
               )}
             </div>
             <button
-              onClick={virmaToggleMute}
-              className={`p-1.5 rounded-full transition-all ${virmaMuted ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary"}`}
-              title={virmaMuted ? "Activar voz" : "Silenciar"}
+              onClick={aiToggleMute}
+              className={`p-1.5 rounded-full transition-all ${aiMuted ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary"}`}
+              title={aiMuted ? "Activar voz" : "Silenciar"}
             >
-              {virmaMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+              {aiMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
             </button>
           </div>
         </div>

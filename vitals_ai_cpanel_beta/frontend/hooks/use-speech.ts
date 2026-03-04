@@ -10,7 +10,7 @@ type SpeechRecognitionEventType = any
 /* ─────────────────────────────────────────────────────────
  * useSpeech – Web Speech API wrapper (TTS + STT)
  *
- *  TTS  – speak(text)  → Virma habla al paciente
+ *  TTS  – speak(text)  → Asistente IA habla al paciente
  *  STT  – startListening() / stopListening() → paciente dicta
  * ───────────────────────────────────────────────────────── */
 
@@ -69,19 +69,16 @@ export function useSpeech(opts: UseSpeechOptions = {}) {
     synthRef.current = synth
     setTtsSupported(true)
 
-    // Pick best Spanish voice
+    // Pick best Spanish voice (gender-neutral priority)
     const pickVoice = () => {
       const voices = synth.getVoices()
       if (!voices.length) return
 
-      // Prefer female Spanish voices — Google > Microsoft > default
-      const candidates = voices.filter(
-        (v) => v.lang.startsWith("es") && !v.name.toLowerCase().includes("male")
-      )
-      // Priority: Google español > Google español de Latinoamérica > Microsoft > any
+      // All Spanish voices
+      const candidates = voices.filter((v) => v.lang.startsWith("es"))
+      // Priority: Google español > Microsoft (any) > first available
       const google = candidates.find((v) => v.name.includes("Google"))
-      const ms = candidates.find((v) => v.name.includes("Microsoft") && v.name.includes("Dalia"))
-        || candidates.find((v) => v.name.includes("Microsoft"))
+      const ms = candidates.find((v) => v.name.includes("Microsoft"))
       const any = candidates[0]
       voiceRef.current = google || ms || any || voices.find((v) => v.lang.startsWith("es")) || null
     }
