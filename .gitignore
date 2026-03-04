@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# IDE
+.vscode/
+.idea/
+
+# Certs (keep .example, ignore real ones)
+# *.pem
+
+# Database
+*.db
+*.sqlite3
+
+# Models store binaries
+vitals_ai_cpanel_beta/backend/models_store/*.joblib
+vitals_ai_cpanel_beta/backend/models_store/*.pkl
