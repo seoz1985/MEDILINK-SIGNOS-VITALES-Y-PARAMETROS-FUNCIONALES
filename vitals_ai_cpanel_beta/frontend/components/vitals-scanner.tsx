@@ -496,8 +496,9 @@ export function VitalsScanner() {
 
   const scanLocked = appPhase === "scanning" || appPhase === "analyzing"
 
-  // ── Protección anti-navegación durante escaneo ──────────────
-  // Bloquea pull-to-refresh, swipe-back y scroll accidental en móvil
+  // ── Protección anti-navegación y anti-recarga durante escaneo ──────
+  // Bloquea pull-to-refresh, swipe-back, scroll accidental, y sobre
+  // todo IMPIDE que Next.js HMR recargue la página matando el scan.
   useEffect(() => {
     if (!scanLocked) return
 
@@ -516,10 +517,53 @@ export function VitalsScanner() {
     const blockTouch = (e: TouchEvent) => { e.preventDefault() }
     document.addEventListener("touchmove", blockTouch, { passive: false })
 
-    // NOTA: beforeunload ELIMINADO a propósito.
-    // En dev mode, Next.js HMR intenta recargar y el beforeunload
-    // mostraba un diálogo "deseas volver a cargar" que confundía al usuario.
-    // La protección real viene de lockNavigation() y popstate handler.
+    // ── beforeunload: IMPRESCINDIBLE ──
+    // Next.js HMR en dev mode intenta recargar la página cuando detecta
+    // desconexiones de WebSocket (WiFi inestable, pantalla apagada, etc).
+    // Sin beforeunload, la recarga sucede silenciosamente y MATA el escaneo.
+    // CON beforeunload, el navegador muestra un diálogo de confirmación
+    // que da al usuario la opción de "Quedarse" y proteger el escaneo.
+    const blockUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ""
+    }
+    window.addEventListener("beforeunload", blockUnload)
+
+    // ── Interceptar WebSockets de HMR para bloquear recargas automáticas ──
+    // Next.js Turbopack/Webpack mantiene un WebSocket que envía comandos
+    // de "reload" al reconectarse. Interceptamos nuevas conexiones WS
+    // y cerramos las que intenten enviar comandos de recarga.
+    const OrigWebSocket = window.WebSocket
+    const hmrSockets: WebSocket[] = []
+    try {
+      const PatchedWS = function (this: any, url: string | URL, protocols?: string | string[]) {
+        const ws = new OrigWebSocket(url, protocols)
+        const urlStr = typeof url === "string" ? url : url.toString()
+        if (urlStr.includes("_next") || urlStr.includes("hmr") || urlStr.includes("turbopack") || urlStr.includes("webpack")) {
+          hmrSockets.push(ws)
+          ws.addEventListener("message", (evt) => {
+            try {
+              if (typeof evt.data === "string") {
+                const d = JSON.parse(evt.data)
+                if (d && (d.type === "reload" || d.type === "full-reload" || d.action === "serverComponentChanges" || d.action === "reloadPage")) {
+                  console.warn("[Scan] ⛔ Blocked HMR reload command during scan:", d.type || d.action)
+                  try { ws.close() } catch {}
+                }
+              }
+            } catch { /* JSON parse fail — ignorar */ }
+          })
+        }
+        return ws
+      } as unknown as typeof WebSocket
+      Object.defineProperty(PatchedWS, "CONNECTING", { value: 0 })
+      Object.defineProperty(PatchedWS, "OPEN", { value: 1 })
+      Object.defineProperty(PatchedWS, "CLOSING", { value: 2 })
+      Object.defineProperty(PatchedWS, "CLOSED", { value: 3 })
+      PatchedWS.prototype = OrigWebSocket.prototype
+      window.WebSocket = PatchedWS
+    } catch (e) {
+      console.warn("[Scan] No se pudo parchear WebSocket:", e)
+    }
 
     // Prevenir popstate (botón atrás del navegador)
     const blockPop = () => {
@@ -536,8 +580,12 @@ export function VitalsScanner() {
       body.style.touchAction = ""
       html.classList.remove("scan-active")
       document.removeEventListener("touchmove", blockTouch)
-      // (beforeunload eliminado)
+      window.removeEventListener("beforeunload", blockUnload)
       window.removeEventListener("popstate", blockPop)
+      // Restaurar WebSocket original
+      try { window.WebSocket = OrigWebSocket } catch {}
+      // Cerrar sockets HMR interceptados
+      hmrSockets.forEach((ws) => { try { ws.close() } catch {} })
     }
   }, [scanLocked])
 
@@ -575,7 +623,7 @@ export function VitalsScanner() {
     : Math.max(0, Math.round(TOTAL_MEASUREMENT_SECS * (1 - scanState.totalProgress / 100)))
 
   return (
-    <div className="min-h-screen bg-background pb-20">
+    <div className={`min-h-screen bg-background ${scanLocked ? 'pb-0' : 'pb-20'}`}>
       <AppHeader title="Signos Vitales" subtitle="Monitoreo Clínico con IA" scanLocked={scanLocked} />
 
       <main className="max-w-lg mx-auto px-4 py-4 space-y-4">
@@ -1123,7 +1171,7 @@ export function VitalsScanner() {
         )}
       </main>
 
-      <BottomNav disabled={scanLocked} />
+      {!scanLocked && <BottomNav />}
     </div>
   )
 }
