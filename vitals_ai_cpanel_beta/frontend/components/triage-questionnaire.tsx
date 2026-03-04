@@ -25,9 +25,9 @@ export function TriageQuestionnaire({
   onSubmit: (q: Questionnaire) => void
 }) {
   const [q, setQ] = useState<Questionnaire>({
-    chief_complaint: "disnea",
-    duration_hours: 6,
-    dyspnea: true,
+    chief_complaint: "",
+    duration_hours: 0,
+    dyspnea: false,
     cough: false,
     fever: false,
     chest_pain: false,
@@ -51,6 +51,7 @@ export function TriageQuestionnaire({
               <SelectValue placeholder="Selecciona" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="ninguno">— Seleccione —</SelectItem>
               <SelectItem value="disnea">Disnea</SelectItem>
               <SelectItem value="dolor_toracico">Dolor torácico</SelectItem>
               <SelectItem value="fiebre">Fiebre</SelectItem>

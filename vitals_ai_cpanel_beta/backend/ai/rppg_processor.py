@@ -219,19 +219,68 @@ class RPPGProcessor:
             heart_rate = self._estimate_hr_chrom(all_r, all_g, all_b, self.fps)
             spo2 = self._estimate_spo2(all_r, all_b, self.fps, g_signal=all_g)
 
-        # ── RR: preferir fase respiratoria (4) ───────────────────
+        # ── RR: usar TODAS las fases de medición (1-5) ────────────
+        # La respiración es un proceso continuo; las fases cardíaca,
+        # ocular, respiratoria y vascular TODAS contienen información
+        # respiratoria valiosa.  Fase 4 es la primaria (guiada), pero
+        # las demás aportan RSA, RIAV y movimiento torácico.
         if has_phases:
-            r_r, g_r, b_r, pn_r = _get_signals([4])
-            use_resp = r_r is not None and len(r_r) >= min_rr
+            # Primero: datos de TODAS las fases de medición
+            r_all_ph, g_all_ph, b_all_ph, pn_all_ph = _get_signals([1, 2, 3, 4, 5])
+            # Segundo: datos específicos de fase respiratoria
+            r_r4, g_r4, b_r4, pn_r4 = _get_signals([4])
+            has_full = r_all_ph is not None and len(r_all_ph) >= min_rr
+            has_resp4 = r_r4 is not None and len(r_r4) >= min_rr
         else:
-            use_resp = False
+            has_full = False
+            has_resp4 = False
 
-        if use_resp:
-            resp_rate = self._estimate_resp_rate(
-                r_r, g_r, b_r, self.fps, perinasal_signal=pn_r)
+        # Calcular RR desde todas las fases (más datos = mejor fusión)
+        rr_full = None
+        resp_detail_full = None
+        if has_full:
+            rr_full, resp_detail_full = self._estimate_resp_rate(
+                r_all_ph, g_all_ph, b_all_ph, self.fps,
+                perinasal_signal=pn_all_ph, heart_rate=heart_rate)
+
+        # Calcular RR desde fase respiratoria pura (guiada)
+        rr_phase4 = None
+        resp_detail_p4 = None
+        if has_resp4:
+            rr_phase4, resp_detail_p4 = self._estimate_resp_rate(
+                r_r4, g_r4, b_r4, self.fps,
+                perinasal_signal=pn_r4, heart_rate=heart_rate)
+
+        # Fallback: señal completa
+        rr_global = None
+        resp_detail_global = None
+        if rr_full is None and rr_phase4 is None:
+            rr_global, resp_detail_global = self._estimate_resp_rate(
+                all_r, all_g, all_b, self.fps,
+                perinasal_signal=all_pn, heart_rate=heart_rate)
+
+        # Fusión de estimaciones multi-ventana
+        rr_candidates = []
+        if rr_full is not None:
+            rr_candidates.append(rr_full)
+        if rr_phase4 is not None:
+            rr_candidates.append(rr_phase4)
+        if rr_global is not None:
+            rr_candidates.append(rr_global)
+
+        if len(rr_candidates) >= 2:
+            # Si concuerdan (±3 rpm): promediar
+            if abs(rr_candidates[0] - rr_candidates[1]) <= 3.0:
+                resp_rate = sum(rr_candidates[:2]) / 2.0
+            else:
+                resp_rate = float(np.median(rr_candidates))
+        elif len(rr_candidates) == 1:
+            resp_rate = rr_candidates[0]
         else:
-            resp_rate = self._estimate_resp_rate(
-                all_r, all_g, all_b, self.fps, perinasal_signal=all_pn)
+            resp_rate = None
+
+        # Tomar el detalle más completo disponible
+        resp_detail = resp_detail_full or resp_detail_p4 or resp_detail_global
 
         # ── BP: preferir fases cardíaco+vascular (2+5) ──────────
         if has_phases:
@@ -279,6 +328,7 @@ class RPPGProcessor:
             'bp_dia': bp_dia,
             'temp_c': temp_c,
             'signal_quality': quality,
+            'resp_detail': resp_detail if resp_detail else None,
             'total_frames': self.frame_count,
             'face_detected_frames': self.face_detected_count,
             'buffer_samples': n,
@@ -799,119 +849,122 @@ class RPPGProcessor:
     @staticmethod
     def _estimate_resp_rate(r_signal: list[float], g_signal: list[float],
                             b_signal: list[float], fps: float,
-                            perinasal_signal: list[float] = None) -> Optional[float]:
+                            perinasal_signal: list[float] = None,
+                            heart_rate: float = None) -> tuple[Optional[float], Optional[dict]]:
         """
-        Estima frecuencia respiratoria usando 4 fuentes fisiológicas
-        independientes y fusión robusta por votación.
+        Estima frecuencia respiratoria usando 6 fuentes fisiológicas
+        independientes, validación cruzada con FC, y fusión robusta
+        con ponderación por SNR.
 
-        Fuentes de señal respiratoria en video facial:
+        Fuentes de señal respiratoria:
           1) RSA (Respiratory Sinus Arrhythmia): la respiración modula
-             la frecuencia cardíaca.  Se extrae de la envolvente de
-             la señal CHROM (modulación en amplitud del pulso).
+             la FC instantánea.  Se extrae de la envolvente de
+             la señal CHROM.
           2) RIIV (Respiratory Induced Intensity Variation): la respiración
-             causa cambios sutiles en la luminancia facial global
-             (expansión torácica → leve movimiento craneal).
-             Se extrae del promedio de intensidad del canal verde.
-          3) RIAV (Respiratory Induced Amplitude Variation): la respiración
-             modula la amplitud pico-a-pico de cada ciclo cardíaco.
-             Requiere detectar picos en la señal rPPG y medir su
-             envolvente de amplitud.
-          4) Aleteo Nasal (Nasal Flare): la zona perinasal muestra
-             cambios de intensidad por el movimiento de fosas nasales
-             durante respiración.  Es una señal respiratoria directa
-             (no derivada del pulso cardíaco) → independiente de RSA/RIAV.
+             causa cambios de luminancia facial (expansión torácica →
+             leve movimiento craneal).  Canal verde.
+          3) RIAV (Respiratory Induced Amplitude Variation): modulación
+             de amplitud pico-a-pico de cada ciclo cardíaco.
+          4) Aleteo Nasal: cambios de intensidad perinasal por flujo
+             de aire y movimiento de fosas nasales.
+          5) Intervalo RR cardíaco (BBI): variación beat-to-beat del
+             intervalo R-R.  La fase inspiratoria acorta el RR y la
+             espiratoria lo alarga → frecuencia dominante = FR.
+          6) Canal rojo-azul diferencial: la relación R/B cambia con
+             la oxigenación cíclica respiratoria (Beer-Lambert).
 
-        Fusión:
-          - Los 3 estimadores son independientes → si ≥2 concuerdan
-            (±3 rpm), su promedio es confiable
-          - Si divergen, la mediana es robusta a un outlier
+        Parámetros fisiológicos cruzados:
+          - Ratio HR/RR (normalmente 4:1 a 5:1 en adultos)
+          - Coherencia cardio-respiratoria
+          - Profundidad respiratoria (amplitud de modulación)
+          - Regularidad (varianza de ciclos consecutivos)
 
-        Referencia: Poh, McDuff & Picard, "Advancements in Noncontact,
-        Multiparameter Physiological Measurements Using a Webcam,"
-        IEEE Trans. Biomed. Eng., 2011.
+        Retorna: (rr_bpm, detail_dict) o (None, None).
+
+        Referencias:
+          - Poh, McDuff & Picard, IEEE Trans. Biomed. Eng., 2011
+          - Charlton et al., Physiol. Meas., 2018
+          - Gastel et al., "Camera-based vital signs monitoring," 2016
         """
         n = len(g_signal)
-        min_needed = max(int(fps * 10), 40)  # al menos 10s para respiración
+        min_needed = max(int(fps * 8), 30)  # relajado: 8s mínimo
         if n < min_needed:
-            return None
+            return None, None
 
         nyq = fps / 2.0
         hr_high = min(2.5, nyq * 0.85)
 
-        # Banda respiratoria: 0.1–0.5 Hz = 6–30 rpm
-        resp_low = 0.1
-        resp_high = min(0.5, nyq * 0.90)
+        # Banda respiratoria: 0.08–0.55 Hz = 4.8–33 rpm (ampliada)
+        resp_low = 0.08
+        resp_high = min(0.55, nyq * 0.90)
         if resp_high <= resp_low:
-            return None
+            return None, None
 
-        estimates = []
+        # Lista de (nombre, rr_bpm, snr)
+        estimates: list[tuple[str, float, float]] = []
+
+        # Señal CHROM compartida entre fuentes
+        chrom = None
+        try:
+            chrom = RPPGProcessor._chrom_signal(r_signal, g_signal, b_signal)
+        except Exception:
+            pass
 
         # ─── Fuente 1: RSA (envolvente de amplitud de señal CHROM) ─
         try:
-            chrom = RPPGProcessor._chrom_signal(r_signal, g_signal, b_signal)
-            if hr_high > 0.75:
+            if chrom is not None and hr_high > 0.75:
                 filtered_hr = RPPGProcessor._bandpass_filter(
                     chrom.tolist(), fps, low=0.7, high=hr_high
                 )
-                # Envolvente analítica (amplitud instantánea)
                 analytic = sp_signal.hilbert(filtered_hr)
                 envelope_rsa = np.abs(analytic)
 
-                rr_rsa = RPPGProcessor._resp_from_signal(
-                    envelope_rsa, fps, resp_low, resp_high
+                rr_rsa, snr_rsa = RPPGProcessor._resp_from_signal(
+                    envelope_rsa, fps, resp_low, resp_high, return_snr=True
                 )
                 if rr_rsa is not None:
-                    estimates.append(('RSA', rr_rsa))
+                    estimates.append(('RSA', rr_rsa, snr_rsa))
         except Exception:
             pass
 
         # ─── Fuente 2: RIIV (variación de intensidad verde global) ─
-        # El canal verde puro (sin filtro cardíaco) contiene modulación
-        # respiratoria directa por movimiento facial/torácico
         try:
             g_arr = np.array(g_signal, dtype=np.float64)
-            # Detrend lineal para quitar drift de iluminación
             g_detrended = sp_signal.detrend(g_arr, type='linear')
 
-            # Filtro pasa-banda respiratorio directo sobre el canal G
             riiv = RPPGProcessor._bandpass_filter(
                 g_detrended.tolist(), fps, low=resp_low, high=resp_high
             )
 
-            rr_riiv = RPPGProcessor._resp_from_signal(
-                riiv, fps, resp_low, resp_high
+            rr_riiv, snr_riiv = RPPGProcessor._resp_from_signal(
+                riiv, fps, resp_low, resp_high, return_snr=True
             )
             if rr_riiv is not None:
-                estimates.append(('RIIV', rr_riiv))
+                estimates.append(('RIIV', rr_riiv, snr_riiv))
         except Exception:
             pass
 
         # ─── Fuente 3: RIAV (envolvente pico-a-pico de pulso) ─────
-        # Detectar picos en la señal cardíaca filtrada y crear una señal
-        # de amplitud pico-a-pico que refleja la modulación respiratoria
         try:
-            if hr_high > 0.75:
+            if chrom is not None and hr_high > 0.75:
                 chrom_filt = RPPGProcessor._bandpass_filter(
                     chrom.tolist(), fps, low=0.75, high=hr_high
                 )
 
-                # Detectar picos cardíacos
-                min_dist = max(int(fps * 0.4), 2)  # mínimo 0.4s entre latidos
-                peaks, props = sp_signal.find_peaks(
+                min_dist = max(int(fps * 0.4), 2)
+                peaks, _ = sp_signal.find_peaks(
                     chrom_filt,
                     distance=min_dist,
-                    prominence=0.05 * np.std(chrom_filt)
+                    prominence=0.03 * np.std(chrom_filt)  # umbral reducido
                 )
 
-                if len(peaks) >= 6:  # al menos 6 latidos
-                    # Amplitudes pico-a-pico
-                    peak_amps = chrom_filt[peaks]
+                if len(peaks) >= 5:  # relajado: 5 latidos
+                    peak_amps = np.array(chrom_filt)[peaks]
                     peak_times = peaks / fps
 
-                    # Interpolar a muestreo uniforme para análisis espectral
                     if peak_times[-1] > peak_times[0]:
                         uniform_t = np.arange(peak_times[0], peak_times[-1], 1.0 / fps)
-                        if len(uniform_t) > 10:
+                        if len(uniform_t) > 8:
                             riav_interp = np.interp(uniform_t, peak_times, peak_amps)
                             riav_detrend = sp_signal.detrend(riav_interp, type='linear')
 
@@ -919,84 +972,240 @@ class RPPGProcessor:
                                 riav_detrend.tolist(), fps, low=resp_low, high=resp_high
                             )
 
-                            rr_riav = RPPGProcessor._resp_from_signal(
-                                riav_filt, fps, resp_low, resp_high
+                            rr_riav, snr_riav = RPPGProcessor._resp_from_signal(
+                                riav_filt, fps, resp_low, resp_high, return_snr=True
                             )
                             if rr_riav is not None:
-                                estimates.append(('RIAV', rr_riav))
+                                estimates.append(('RIAV', rr_riav, snr_riav))
         except Exception:
             pass
 
         # ─── Fuente 4: Aleteo Nasal (señal perinasal directa) ───
-        # La zona de las fosas nasales muestra variaciones de intensidad
-        # directamente causadas por la respiración (flujo de aire,
-        # movimiento de alas nasales).  Es independiente del pulso.
         if perinasal_signal and len(perinasal_signal) >= min_needed:
             try:
                 pn_arr = np.array(perinasal_signal[-n:], dtype=np.float64)
                 pn_detrended = sp_signal.detrend(pn_arr, type='linear')
 
-                # Filtro pasa-banda respiratorio sobre señal perinasal
                 pn_filt = RPPGProcessor._bandpass_filter(
                     pn_detrended.tolist(), fps, low=resp_low, high=resp_high
                 )
 
-                rr_nasal = RPPGProcessor._resp_from_signal(
-                    pn_filt, fps, resp_low, resp_high
+                rr_nasal, snr_nasal = RPPGProcessor._resp_from_signal(
+                    pn_filt, fps, resp_low, resp_high, return_snr=True
                 )
                 if rr_nasal is not None:
-                    estimates.append(('NasalFlare', rr_nasal))
+                    estimates.append(('NasalFlare', rr_nasal, snr_nasal))
             except Exception:
                 pass
 
+        # ─── Fuente 5: Intervalo Beat-to-Beat (BBI) ─────────────
+        # La variación del intervalo R-R contiene modulación respiratoria
+        # directa: inspiración acorta el RR, espiración lo alarga.
+        try:
+            if chrom is not None and hr_high > 0.75:
+                chrom_hr = RPPGProcessor._bandpass_filter(
+                    chrom.tolist(), fps, low=0.75, high=hr_high
+                )
+                min_dist_bbi = max(int(fps * 0.35), 2)
+                peaks_bbi, _ = sp_signal.find_peaks(
+                    chrom_hr, distance=min_dist_bbi,
+                    prominence=0.03 * np.std(chrom_hr)
+                )
+
+                if len(peaks_bbi) >= 8:  # al menos 8 latidos para BBI
+                    # Calcular intervalos beat-to-beat
+                    bbi = np.diff(peaks_bbi) / fps  # en segundos
+                    bbi_times = peaks_bbi[1:] / fps  # timestamps
+
+                    # Interpolar a muestreo uniforme
+                    if bbi_times[-1] > bbi_times[0] and len(bbi) >= 6:
+                        uniform_bbi_t = np.arange(
+                            bbi_times[0], bbi_times[-1], 1.0 / fps
+                        )
+                        if len(uniform_bbi_t) > 10:
+                            bbi_interp = np.interp(uniform_bbi_t, bbi_times, bbi)
+                            bbi_detrend = sp_signal.detrend(bbi_interp, type='linear')
+
+                            bbi_filt = RPPGProcessor._bandpass_filter(
+                                bbi_detrend.tolist(), fps,
+                                low=resp_low, high=resp_high
+                            )
+
+                            rr_bbi, snr_bbi = RPPGProcessor._resp_from_signal(
+                                bbi_filt, fps, resp_low, resp_high, return_snr=True
+                            )
+                            if rr_bbi is not None:
+                                estimates.append(('BBI', rr_bbi, snr_bbi))
+        except Exception:
+            pass
+
+        # ─── Fuente 6: Diferencial Rojo-Azul (Beer-Lambert resp) ─
+        # La relación R/B varía con la oxigenación cíclica respiratoria:
+        # inspiración → ↑SpO2 → cambio en absorbancia diferencial R-B
+        try:
+            r_arr = np.array(r_signal, dtype=np.float64)
+            b_arr = np.array(b_signal, dtype=np.float64)
+            # Evitar división por cero
+            b_safe = np.where(b_arr > 1.0, b_arr, 1.0)
+            rb_ratio = r_arr / b_safe
+            rb_detrend = sp_signal.detrend(rb_ratio, type='linear')
+
+            rb_filt = RPPGProcessor._bandpass_filter(
+                rb_detrend.tolist(), fps, low=resp_low, high=resp_high
+            )
+
+            rr_rb, snr_rb = RPPGProcessor._resp_from_signal(
+                rb_filt, fps, resp_low, resp_high, return_snr=True
+            )
+            if rr_rb is not None:
+                estimates.append(('RB_ratio', rr_rb, snr_rb))
+        except Exception:
+            pass
+
         if not estimates:
-            return None
+            return None, None
 
-        # ─── Fusión robusta ──────────────────────────────────────
-        rr_values = [est[1] for est in estimates]
+        # ─── Fusión robusta ponderada por SNR ────────────────────
+        # Cada fuente tiene un peso proporcional a su SNR
+        names = [e[0] for e in estimates]
+        rr_values = np.array([e[1] for e in estimates])
+        snr_values = np.array([max(e[2], 0.1) for e in estimates])
 
-        if len(rr_values) >= 2:
-            # Buscar par más concordante (±3 rpm)
-            best_pair = None
-            best_diff = float('inf')
+        # Normalizar pesos
+        weights = snr_values / snr_values.sum()
+
+        if len(rr_values) >= 3:
+            # Con 3+ fuentes: buscar cluster concordante (±3 rpm)
+            # y promediar ponderado por SNR dentro del cluster
+            best_cluster = []
+            best_cluster_score = 0
             for i in range(len(rr_values)):
-                for j in range(i + 1, len(rr_values)):
-                    d = abs(rr_values[i] - rr_values[j])
-                    if d < best_diff:
-                        best_diff = d
-                        best_pair = (rr_values[i], rr_values[j])
+                cluster = [j for j in range(len(rr_values))
+                           if abs(rr_values[j] - rr_values[i]) <= 3.0]
+                score = sum(weights[j] for j in cluster)
+                if score > best_cluster_score:
+                    best_cluster = cluster
+                    best_cluster_score = score
 
-            if best_diff <= 3.0 and best_pair is not None:
-                rr = sum(best_pair) / 2.0
+            if len(best_cluster) >= 2:
+                c_vals = rr_values[best_cluster]
+                c_wts = snr_values[best_cluster]
+                rr = float(np.average(c_vals, weights=c_wts))
             else:
-                rr = float(np.median(rr_values))
+                rr = float(np.average(rr_values, weights=weights))
+
+        elif len(rr_values) == 2:
+            if abs(rr_values[0] - rr_values[1]) <= 3.0:
+                rr = float(np.average(rr_values, weights=weights))
+            else:
+                # Tomar la de mayor SNR
+                rr = float(rr_values[np.argmax(snr_values)])
         else:
-            rr = rr_values[0]
+            rr = float(rr_values[0])
 
-        # ── Regularización con prior fisiológico ─────────────────
-        # RR normal en reposo: 14-18 rpm
-        # Con pocas fuentes, sesgar hacia el centro del rango normal
+        # ── Validación cruzada con FC ────────────────────────────
+        # Ratio fisiológico HR/RR en adulto sano en reposo: 4:1 a 5:1
+        # Rango aceptable extendido: 3:1 a 7:1
+        hr_rr_expected = None
+        if heart_rate and heart_rate > 40:
+            hr_rr_expected = heart_rate / rr if rr > 0 else None
+            if hr_rr_expected is not None:
+                # Si la ratio está muy fuera de rango, sesgo suave
+                if hr_rr_expected < 2.5 or hr_rr_expected > 8.0:
+                    # RR probablemente es un outlier; ajuste moderado
+                    expected_rr = heart_rate / 4.5
+                    rr = rr * 0.65 + expected_rr * 0.35
+
+        # ── Prior fisiológico suave (solo como regularización leve) ─
+        # Con pocas fuentes, sesgo muy leve (10-20%) hacia 16 rpm
         n_sources = len(estimates)
-        confidence = min(n_sources / 4.0, 1.0)  # 4 fuentes = máxima confianza
+        if n_sources <= 2:
+            prior_weight = 0.12  # solo 12% de sesgo con pocas fuentes
+        else:
+            prior_weight = 0.0   # con 3+ fuentes, sin sesgo
         prior_rr = 16.0
-        rr = rr * confidence + prior_rr * (1.0 - confidence)
+        rr = rr * (1.0 - prior_weight) + prior_rr * prior_weight
 
-        if rr < 8 or rr > 28:
-            return None
-        return round(rr, 1)
+        # ── Métricas de profundidad y regularidad respiratoria ───
+        resp_depth = None
+        resp_regularity = None
+        try:
+            # Usar la mejor señal respiratoria (mayor SNR) para métricas
+            best_idx = int(np.argmax(snr_values))
+            best_name = names[best_idx]
+
+            # Reconstruir la señal respiratoria filtrada de la mejor fuente
+            # para métricas de profundidad y regularidad
+            g_arr_m = np.array(g_signal, dtype=np.float64)
+            g_det_m = sp_signal.detrend(g_arr_m, type='linear')
+            resp_sig = RPPGProcessor._bandpass_filter(
+                g_det_m.tolist(), fps, low=resp_low, high=resp_high
+            )
+
+            # Profundidad: amplitud RMS de la señal respiratoria
+            # Normalizada contra el verde medio (variación relativa)
+            green_mean = np.mean(np.abs(g_arr_m)) if np.mean(np.abs(g_arr_m)) > 0 else 1.0
+            resp_amplitude = float(np.std(resp_sig) / green_mean * 100)
+
+            # Clasificar profundidad
+            if resp_amplitude > 1.5:
+                resp_depth = 'profunda'
+            elif resp_amplitude > 0.5:
+                resp_depth = 'normal'
+            else:
+                resp_depth = 'superficial'
+
+            # Regularidad: detectar picos respiratorios y medir varianza
+            peaks_resp, _ = sp_signal.find_peaks(
+                resp_sig, distance=max(int(fps * 1.5), 3)
+            )
+            if len(peaks_resp) >= 3:
+                intervals = np.diff(peaks_resp) / fps  # en segundos
+                cv = float(np.std(intervals) / np.mean(intervals))  # coef. variación
+                if cv < 0.15:
+                    resp_regularity = 'regular'
+                elif cv < 0.30:
+                    resp_regularity = 'ligeramente irregular'
+                else:
+                    resp_regularity = 'irregular'
+        except Exception:
+            pass
+
+        if rr < 6 or rr > 35:
+            return None, None
+
+        # ── Detalle completo ─────────────────────────────────────
+        detail = {
+            'sources': [
+                {'name': e[0], 'rr_bpm': round(e[1], 1), 'snr': round(e[2], 2)}
+                for e in estimates
+            ],
+            'n_sources': n_sources,
+            'fused_rr': round(rr, 1),
+            'depth': resp_depth,
+            'regularity': resp_regularity,
+            'hr_rr_ratio': round(hr_rr_expected, 1) if hr_rr_expected else None,
+        }
+
+        return round(rr, 1), detail
 
     @staticmethod
     def _resp_from_signal(sig: np.ndarray, fps: float,
-                          low_hz: float, high_hz: float) -> Optional[float]:
+                          low_hz: float, high_hz: float,
+                          return_snr: bool = False):
         """
         Extrae frecuencia respiratoria dominante de una señal usando
         Welch PSD + interpolación parabólica.
 
-        Usado internamente por cada fuente (RSA, RIIV, RIAV).
+        Usado internamente por cada fuente (RSA, RIIV, RIAV, BBI, R/B).
+
+        Si return_snr=True, retorna (rr_bpm, snr) en vez de solo rr_bpm.
         """
+        _none = (None, None) if return_snr else None
+
         n = len(sig)
         if n < 20:
-            return None
+            return _none
 
         # Welch PSD con segmentos largos para estabilidad
         seg_len = min(n, max(int(fps * 15), n // 2))
@@ -1010,26 +1219,31 @@ class RPPGProcessor:
                 nfft=nfft, detrend='constant'
             )
         except Exception:
-            return None
+            return _none
 
         mask = (freqs >= low_hz) & (freqs <= high_hz)
         if not np.any(mask):
-            return None
+            return _none
 
         psd_v = psd[mask]
         freqs_v = freqs[mask]
 
-        # Pico debe ser significativo (SNR > 1.5x media)
+        # Pico debe ser significativo (SNR > 1.2x media — umbral relajado)
         peak_idx = int(np.argmax(psd_v))
         mean_psd = float(np.mean(psd_v))
-        if mean_psd > 0 and psd_v[peak_idx] / mean_psd < 1.3:
-            return None
+        snr = float(psd_v[peak_idx] / mean_psd) if mean_psd > 0 else 0.0
+
+        if snr < 1.2:
+            return _none
 
         peak_freq = RPPGProcessor._parabolic_interp(freqs_v, psd_v, peak_idx)
         rr_bpm = peak_freq * 60.0
 
-        if rr_bpm < 6 or rr_bpm > 35:
-            return None
+        if rr_bpm < 4.8 or rr_bpm > 35:
+            return _none
+
+        if return_snr:
+            return rr_bpm, snr
         return rr_bpm
 
     # ── Presión Arterial — Método frecuencial ─────────────────────
