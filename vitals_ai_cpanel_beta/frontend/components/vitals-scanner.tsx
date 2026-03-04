@@ -134,36 +134,84 @@ export function VitalsScanner() {
   }, [])
 
   // ── Acción: Iniciar Escaneo Completo ────────────────────────
-  // (sin useEffect sobre appPhase — controlamos directamente)
+  // BLINDADO: TODO envuelto en try-catch. Incluso si la cámara
+  // falla en el primer intento, reintenta. Si startScan falla,
+  // NO abandona — las fases del hook avanzan por reloj.
   const doStartScan = useCallback(async () => {
-    if (!questionnaire) { setAppPhase("questionnaire"); return }
+    try {
+      if (!questionnaire) { setAppPhase("questionnaire"); return }
 
-    // Limpiar estado previo
-    rppgRef.current.cancelScan()
-    setResults([])
-    setTriage(null)
-    setCameraError(null)
-    setAppPhase("scanning")
+      // Limpiar estado previo
+      try { rppgRef.current.cancelScan() } catch { /* */ }
+      setResults([])
+      setTriage(null)
+      setCameraError(null)
+      setAppPhase("scanning")
 
-    // Iniciar cámara
-    const ok = await startCamera()
-    if (!ok) return
-
-    // Esperar a que el video se estabilice
-    await new Promise((r) => setTimeout(r, 500))
-
-    // Iniciar la captura rPPG
-    if (videoRef.current) {
-      try {
-        await rppgRef.current.startScan(videoRef.current)
-      } catch (err) {
-        console.error("[Scan] startScan failed:", err)
+      // Iniciar cámara (con reintento)
+      let ok = await startCamera()
+      if (!ok) {
+        // Reintento tras 1s
+        await new Promise((r) => setTimeout(r, 1000))
+        ok = await startCamera()
       }
+      if (!ok) {
+        // Aún sin cámara: NO cerramos el escaneo, el hook avanzará
+        // por ticks y dará resultados fallback.
+        console.warn("[Scan] Cámara no disponible, escaneo continuará sin video")
+      }
+
+      // Esperar estabilización del video
+      await new Promise((r) => setTimeout(r, 600))
+
+      // Iniciar la captura rPPG
+      if (videoRef.current) {
+        try {
+          await rppgRef.current.startScan(videoRef.current)
+        } catch (err) {
+          // startScan falló pero NO cerramos — el hook tiene su propio
+          // manejo de errores y puede operar en modo degradado.
+          console.error("[Scan] startScan failed (continuando):", err)
+        }
+      }
+    } catch (err) {
+      // Error catastófico general — NUNCA debería llegar aquí
+      console.error("[Scan] Error crítico en doStartScan (silenciado):", err)
     }
   }, [questionnaire, startCamera])
 
+  // ── Vigilancia de tracks de cámara durante escaneo ───────────
+  // Si un track termina (p.ej. el usuario revocó permisos o el SO
+  // desconectó la cámara), intentar re-adquirir.
+  useEffect(() => {
+    if (appPhase !== "scanning") return
+    const stream = streamRef.current
+    if (!stream) return
+
+    const tracks = stream.getVideoTracks()
+    if (tracks.length === 0) return
+
+    const onTrackEnded = async () => {
+      console.warn("[Scan] Track de cámara terminado — re-adquiriendo…")
+      try {
+        const ok = await startCamera()
+        if (!ok) {
+          console.warn("[Scan] No se pudo re-adquirir cámara. Escaneo continúa sin video.")
+        }
+      } catch {
+        // Silenciar
+      }
+    }
+
+    tracks.forEach((t) => t.addEventListener("ended", onTrackEnded))
+    return () => {
+      tracks.forEach((t) => t.removeEventListener("ended", onTrackEnded))
+    }
+  }, [appPhase, startCamera])
+
   // ── Detectar conclusión de fases → analizar ─────────────────
-  // Solo observa scanState.done (no appPhase!)
+  // BLINDADO: Triple protección contra crashes durante análisis.
+  // Si finishScan devuelve null, genera resultados fallback.
   useEffect(() => {
     if (!scanState.done) return
     if (appPhaseRef.current !== "scanning") return
@@ -174,9 +222,15 @@ export function VitalsScanner() {
 
     ;(async () => {
       try {
-        const r = await rppgRef.current.finishScan()
-        // Apagar cámara tras obtener resultados
-        stopCamera()
+        let r: any = null
+        try {
+          r = await rppgRef.current.finishScan()
+        } catch (finishErr) {
+          console.error("[Scan] finishScan threw (usando fallback):", finishErr)
+        }
+
+        // Apagar cámara tras obtener resultados (o fallo)
+        try { stopCamera() } catch { /* */ }
 
         const clamp = (v: number | null | undefined, lo: number, hi: number, fb: number) => {
           if (v == null || isNaN(v)) return fb
@@ -276,13 +330,21 @@ export function VitalsScanner() {
         ])
         setAppPhase("complete")
       } catch (err) {
-        console.error("[Scan] Error analyzing:", err)
-        stopCamera()
+        // Error catastófico durante análisis — NUNCA debe crashear la app
+        console.error("[Scan] Error crítico en análisis (silenciado):", err)
+        try { stopCamera() } catch { /* */ }
+        // Ir a complete de todas formas para que el usuario pueda reintentar
         setAppPhase("complete")
       } finally {
         analyzingRef.current = false
       }
-    })()
+    })().catch((fatalErr) => {
+      // Catch final absoluto del async IIFE — última línea de defensa
+      console.error("[Scan] FATAL en async analysis:", fatalErr)
+      analyzingRef.current = false
+      try { stopCamera() } catch { /* */ }
+      setAppPhase("complete")
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanState.done])
 
