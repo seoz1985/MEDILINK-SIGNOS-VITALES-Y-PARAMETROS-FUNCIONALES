@@ -20,6 +20,28 @@ export function AppHeader({ title, subtitle, scanLocked }: AppHeaderProps) {
     navigate("landing")
   }
 
+  // ── BLINDAJE: durante escaneo, renderizar header estático sin botones ──
+  // Eliminamos TODOS los elementos interactivos para evitar
+  // cualquier posibilidad de navegación accidental.
+  if (scanLocked) {
+    return (
+      <header className="sticky top-0 z-40 border-b border-border bg-card/95 backdrop-blur-md" aria-hidden="true" inert="">
+        <div className="max-w-lg mx-auto flex items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+              <Heart className="w-4 h-4 text-primary-foreground" />
+            </div>
+            <div>
+              <h1 className="text-sm font-bold text-foreground font-[family-name:var(--font-space-grotesk)] leading-tight">{title}</h1>
+              {subtitle && <p className="text-[10px] text-muted-foreground leading-tight">{subtitle}</p>}
+            </div>
+          </div>
+          {/* Sin botones durante escaneo */}
+        </div>
+      </header>
+    )
+  }
+
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-card/95 backdrop-blur-md">
       <div className="max-w-lg mx-auto flex items-center justify-between px-4 py-3">

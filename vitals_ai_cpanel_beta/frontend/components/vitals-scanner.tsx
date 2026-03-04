@@ -77,7 +77,7 @@ const PHASE_DESC: Record<number, string> = {
 }
 
 export function VitalsScanner() {
-  const { addVitals } = useApp()
+  const { addVitals, lockNavigation, unlockNavigation } = useApp()
   const [appPhase, setAppPhase] = useState<AppPhase>("questionnaire")
   const [results, setResults] = useState<VitalResult[]>([])
   const [questionnaire, setQuestionnaire] = useState<Questionnaire | null>(null)
@@ -96,6 +96,14 @@ export function VitalsScanner() {
   const rppgRef = useRef(rppg)
   rppgRef.current = rppg
   const { state: scanState } = rppg
+
+  // ── Seguridad: si el componente se desmonta durante escaneo, desbloquear nav ──
+  useEffect(() => {
+    return () => {
+      unlockNavigation()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Cámara ──────────────────────────────────────────────────
   const startCamera = useCallback(async () => {
@@ -141,6 +149,9 @@ export function VitalsScanner() {
     try {
       if (!questionnaire) { setAppPhase("questionnaire"); return }
 
+      // ── BLOQUEO NUCLEAR de navegación a nivel de AppContext ──
+      lockNavigation()
+
       // Limpiar estado previo
       try { rppgRef.current.cancelScan() } catch { /* */ }
       setResults([])
@@ -178,7 +189,7 @@ export function VitalsScanner() {
       // Error catastófico general — NUNCA debería llegar aquí
       console.error("[Scan] Error crítico en doStartScan (silenciado):", err)
     }
-  }, [questionnaire, startCamera])
+  }, [questionnaire, startCamera, lockNavigation])
 
   // ── Vigilancia de tracks de cámara durante escaneo ───────────
   // Si un track termina (p.ej. el usuario revocó permisos o el SO
@@ -329,12 +340,14 @@ export function VitalsScanner() {
           },
         ])
         setAppPhase("complete")
+        unlockNavigation()
       } catch (err) {
         // Error catastófico durante análisis — NUNCA debe crashear la app
         console.error("[Scan] Error crítico en análisis (silenciado):", err)
         try { stopCamera() } catch { /* */ }
         // Ir a complete de todas formas para que el usuario pueda reintentar
         setAppPhase("complete")
+        unlockNavigation()
       } finally {
         analyzingRef.current = false
       }
@@ -344,6 +357,7 @@ export function VitalsScanner() {
       analyzingRef.current = false
       try { stopCamera() } catch { /* */ }
       setAppPhase("complete")
+      unlockNavigation()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanState.done])
@@ -353,8 +367,9 @@ export function VitalsScanner() {
     rppgRef.current.cancelScan()
     stopCamera()
     analyzingRef.current = false
+    unlockNavigation()
     setAppPhase(questionnaire ? "idle" : "questionnaire")
-  }, [questionnaire, stopCamera])
+  }, [questionnaire, stopCamera, unlockNavigation])
 
   // ── Helpers de UI ───────────────────────────────────────────
   const getStatus = (type: string, value: number): "normal" | "warning" | "critical" => {

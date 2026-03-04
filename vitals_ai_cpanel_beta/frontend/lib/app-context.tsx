@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react"
+import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react"
 
 // ── Helpers de persistencia (sessionStorage) ──────────────────────
 function ssGet<T>(key: string, fallback: T): T {
@@ -98,6 +98,10 @@ interface AppContextType {
   setSelectedPatient: (patient: Patient | null) => void
   vitalsHistory: VitalSigns[]
   addVitals: (vitals: VitalSigns) => void
+  /** Bloquear navegación (durante escaneo de vitales) */
+  lockNavigation: () => void
+  unlockNavigation: () => void
+  navigationLocked: boolean
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined)
@@ -108,10 +112,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null)
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null)
   const [vitalsHistory, setVitalsHistory] = useState<VitalSigns[]>([])
+  const [navigationLocked, setNavigationLocked] = useState(false)
+  const navLockedRef = useRef(false) // ref para acceso síncrono inmediato
 
   // Persistir rol y vista en sessionStorage
   const setRole = useCallback((r: UserRole) => { setRoleRaw(r); ssSet("va_role", r) }, [])
-  const navigate = useCallback((view: AppView) => { setCurrentViewRaw(view); ssSet("va_view", view) }, [])
+  const navigate = useCallback((view: AppView) => {
+    // ── BLOQUEO NUCLEAR: si la navegación está bloqueada, NO cambiar de vista ──
+    if (navLockedRef.current) {
+      console.warn("[AppContext] Navegación BLOQUEADA durante escaneo. Ignorando navigate →", view)
+      return
+    }
+    setCurrentViewRaw(view); ssSet("va_view", view)
+  }, [])
+
+  const lockNavigation = useCallback(() => {
+    navLockedRef.current = true
+    setNavigationLocked(true)
+    console.log("[AppContext] Navegación BLOQUEADA")
+  }, [])
+
+  const unlockNavigation = useCallback(() => {
+    navLockedRef.current = false
+    setNavigationLocked(false)
+    console.log("[AppContext] Navegación DESBLOQUEADA")
+  }, [])
 
   // Si al montar el role es null pero había vista guardada, resetear vista
   useEffect(() => {
@@ -138,6 +163,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setSelectedPatient,
         vitalsHistory,
         addVitals,
+        lockNavigation,
+        unlockNavigation,
+        navigationLocked,
       }}
     >
       {children}
