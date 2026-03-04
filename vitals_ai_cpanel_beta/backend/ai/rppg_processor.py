@@ -260,24 +260,48 @@ class RPPGProcessor:
                 perinasal_signal=all_pn, heart_rate=heart_rate)
 
         # Fusión de estimaciones multi-ventana
+        # PRIORIDAD: fase 4 (guiada) tiene más peso porque la respiración
+        # es controlada y la señal es más limpia.
+        # La guía es 2.5s inhale + 2.5s exhale = 5s/ciclo = 12 rpm.
+        GUIDED_RR = 12.0  # frecuencia esperada de la guía respiratoria
+
         rr_candidates = []
+        rr_weights = []
+
+        if rr_phase4 is not None:
+            # Fase 4 (guiada): peso doble y bonus si cerca de la guía
+            w = 2.0
+            if abs(rr_phase4 - GUIDED_RR) <= 4.0:
+                w = 3.0  # muy consonante con la guía
+            rr_candidates.append(rr_phase4)
+            rr_weights.append(w)
+
         if rr_full is not None:
             rr_candidates.append(rr_full)
-        if rr_phase4 is not None:
-            rr_candidates.append(rr_phase4)
+            rr_weights.append(1.0)
+
         if rr_global is not None:
             rr_candidates.append(rr_global)
+            rr_weights.append(0.5)
 
         if len(rr_candidates) >= 2:
-            # Si concuerdan (±3 rpm): promediar
-            if abs(rr_candidates[0] - rr_candidates[1]) <= 3.0:
-                resp_rate = sum(rr_candidates[:2]) / 2.0
-            else:
-                resp_rate = float(np.median(rr_candidates))
+            rr_arr = np.array(rr_candidates)
+            wt_arr = np.array(rr_weights)
+            resp_rate = float(np.average(rr_arr, weights=wt_arr))
         elif len(rr_candidates) == 1:
             resp_rate = rr_candidates[0]
         else:
             resp_rate = None
+
+        # Validación post-fusión: si el resultado está muy lejos del
+        # rango fisiológico normal (8-28 rpm), ajustar suavemente
+        if resp_rate is not None:
+            if resp_rate < 8.0:
+                # Probablemente subarmónico; ajustar hacia la guía
+                resp_rate = resp_rate * 0.4 + GUIDED_RR * 0.6
+            elif resp_rate > 28.0:
+                # Probablemente armónico; ajustar hacia la guía
+                resp_rate = resp_rate * 0.4 + GUIDED_RR * 0.6
 
         # Tomar el detalle más completo disponible
         resp_detail = resp_detail_full or resp_detail_p4 or resp_detail_global
@@ -1110,20 +1134,26 @@ class RPPGProcessor:
         if heart_rate and heart_rate > 40:
             hr_rr_expected = heart_rate / rr if rr > 0 else None
             if hr_rr_expected is not None:
-                # Si la ratio está muy fuera de rango, sesgo suave
-                if hr_rr_expected < 2.5 or hr_rr_expected > 8.0:
+                # Si la ratio está muy fuera de rango, corrección más fuerte
+                if hr_rr_expected < 2.0 or hr_rr_expected > 10.0:
+                    # RR es un outlier claro; corrección fuerte hacia esperado
+                    expected_rr = heart_rate / 4.5
+                    rr = rr * 0.35 + expected_rr * 0.65
+                elif hr_rr_expected < 2.5 or hr_rr_expected > 8.0:
                     # RR probablemente es un outlier; ajuste moderado
                     expected_rr = heart_rate / 4.5
-                    rr = rr * 0.65 + expected_rr * 0.35
+                    rr = rr * 0.60 + expected_rr * 0.40
 
         # ── Prior fisiológico suave (solo como regularización leve) ─
-        # Con pocas fuentes, sesgo muy leve (10-20%) hacia 16 rpm
+        # Con pocas fuentes, sesgo hacia 15 rpm (normal en reposo)
         n_sources = len(estimates)
-        if n_sources <= 2:
-            prior_weight = 0.12  # solo 12% de sesgo con pocas fuentes
+        if n_sources <= 1:
+            prior_weight = 0.20  # 20% de sesgo con una sola fuente
+        elif n_sources == 2:
+            prior_weight = 0.10  # 10% con dos fuentes
         else:
             prior_weight = 0.0   # con 3+ fuentes, sin sesgo
-        prior_rr = 16.0
+        prior_rr = 15.0
         rr = rr * (1.0 - prior_weight) + prior_rr * prior_weight
 
         # ── Métricas de profundidad y regularidad respiratoria ───

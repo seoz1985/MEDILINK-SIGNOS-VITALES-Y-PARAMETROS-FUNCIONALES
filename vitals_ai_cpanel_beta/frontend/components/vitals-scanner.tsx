@@ -516,12 +516,10 @@ export function VitalsScanner() {
     const blockTouch = (e: TouchEvent) => { e.preventDefault() }
     document.addEventListener("touchmove", blockTouch, { passive: false })
 
-    // Prevenir beforeunload (navegación accidental)
-    const blockUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault()
-      e.returnValue = ""
-    }
-    window.addEventListener("beforeunload", blockUnload)
+    // NOTA: beforeunload ELIMINADO a propósito.
+    // En dev mode, Next.js HMR intenta recargar y el beforeunload
+    // mostraba un diálogo "deseas volver a cargar" que confundía al usuario.
+    // La protección real viene de lockNavigation() y popstate handler.
 
     // Prevenir popstate (botón atrás del navegador)
     const blockPop = () => {
@@ -538,7 +536,7 @@ export function VitalsScanner() {
       body.style.touchAction = ""
       html.classList.remove("scan-active")
       document.removeEventListener("touchmove", blockTouch)
-      window.removeEventListener("beforeunload", blockUnload)
+      // (beforeunload eliminado)
       window.removeEventListener("popstate", blockPop)
     }
   }, [scanLocked])
@@ -634,16 +632,16 @@ export function VitalsScanner() {
 
             {/* ━━ SCANNING ━━ */}
             {appPhase === "scanning" && (
-              <div className="flex flex-col items-center py-3 px-4">
+              <div className="flex flex-col items-center py-2 px-3">
                 {cameraError && (
-                  <div className="w-full mb-3 p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-sm text-destructive flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <div className="w-full mb-2 p-2 rounded-lg bg-destructive/10 border border-destructive/30 text-xs text-destructive flex items-start gap-2">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                     <span>{cameraError}</span>
                   </div>
                 )}
 
-                {/* ── Timeline bar ── */}
-                <div className="w-full flex items-center gap-0.5 mb-3">
+                {/* ── Timeline bar (compacto) ── */}
+                <div className="w-full flex items-center gap-0.5 mb-2">
                   {[PHASE.DETECTION, PHASE.CALIBRATION, PHASE.CARDIAC, PHASE.OCULAR, PHASE.RESPIRATORY, PHASE.VASCULAR].map((p) => {
                     const Icon = PHASE_ICONS[p]
                     const isActive = scanState.currentPhase === p
@@ -651,7 +649,7 @@ export function VitalsScanner() {
                     return (
                       <div
                         key={p}
-                        className={`flex-1 flex items-center justify-center gap-0.5 py-1.5 rounded-md text-[8px] font-medium transition-all duration-300 ${
+                        className={`flex-1 flex items-center justify-center gap-0.5 py-1 rounded-md text-[8px] font-medium transition-all duration-300 ${
                           isActive
                             ? "bg-primary text-primary-foreground scale-105 shadow-sm"
                             : isDone
@@ -665,8 +663,69 @@ export function VitalsScanner() {
                   })}
                 </div>
 
-                {/* ── Video + overlays ── */}
-                <div className="relative w-full aspect-[4/3] rounded-xl bg-black mb-3 overflow-hidden">
+                {/* ── Instrucción principal + cues visuales (ARRIBA del video) ── */}
+                <div className="w-full text-center mb-2 space-y-1">
+                  {/* Phase description */}
+                  <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                    {PHASE_DESC[scanState.currentPhase]}
+                  </p>
+
+                  {/* Main instruction */}
+                  <p className="text-sm font-semibold text-foreground">
+                    {scanState.instruction}
+                  </p>
+
+                  {/* Breathing circle */}
+                  {isBreathing && (
+                    <div className="flex flex-col items-center pt-1">
+                      <div
+                        className={`w-10 h-10 rounded-full border-2 border-green-400 flex items-center justify-center transition-transform duration-[2500ms] ease-in-out ${
+                          scanState.breathingGuide === "inhale" ? "scale-125" : "scale-75"
+                        }`}
+                      >
+                        <Wind
+                          className={`w-5 h-5 transition-colors duration-500 ${
+                            scanState.breathingGuide === "inhale" ? "text-blue-400" : "text-green-400"
+                          }`}
+                        />
+                      </div>
+                      <span className={`text-xs font-medium mt-1 ${
+                        scanState.breathingGuide === "inhale" ? "text-blue-500" : "text-green-500"
+                      }`}>
+                        {scanState.breathingGuide === "inhale" ? "INHALA ↑" : "EXHALA ↓"}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Valsalva countdown */}
+                  {isVascular && scanState.vascularCue === "hold" && (
+                    <div className="flex flex-col items-center pt-1">
+                      <div className="w-10 h-10 rounded-full border-2 border-amber-400 flex items-center justify-center bg-amber-500/10">
+                        <span className="text-xl font-bold text-amber-500 font-mono">{valsalvaSecsLeft}</span>
+                      </div>
+                      <span className="text-xs font-medium mt-1 text-amber-500">RETEN ALIENTO</span>
+                    </div>
+                  )}
+
+                  {isVascular && scanState.vascularCue === "release" && (
+                    <div className="flex flex-col items-center pt-1">
+                      <span className="text-xs font-medium text-green-500">¡SUELTA! Respira normal</span>
+                    </div>
+                  )}
+
+                  {/* Ocular icon */}
+                  {isOcular && (
+                    <div className="flex flex-col items-center pt-1">
+                      <div className="w-10 h-10 rounded-full border-2 border-cyan-400 flex items-center justify-center bg-cyan-500/10 animate-pulse">
+                        <ScanEye className="w-5 h-5 text-cyan-400" />
+                      </div>
+                      <span className="text-xs font-medium mt-1 text-cyan-500">OJO DERECHO</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Video + overlays (reducido para dejar espacio) ── */}
+                <div className="relative w-full rounded-xl bg-black mb-2 overflow-hidden" style={{ aspectRatio: '4/3', maxHeight: '45vh' }}>
                   <video
                     ref={videoRef}
                     autoPlay
@@ -764,56 +823,8 @@ export function VitalsScanner() {
                   </div>
                 </div>
 
-                {/* ── Phase instruction + visual cues ── */}
-                <div className="w-full text-center mb-2 space-y-2">
-                  {/* Breathing circle */}
-                  {isBreathing && (
-                    <div className="flex flex-col items-center">
-                      <div
-                        className={`w-14 h-14 rounded-full border-2 border-green-400 flex items-center justify-center transition-transform duration-[2500ms] ease-in-out ${
-                          scanState.breathingGuide === "inhale" ? "scale-125" : "scale-75"
-                        }`}
-                      >
-                        <Wind
-                          className={`w-6 h-6 transition-colors duration-500 ${
-                            scanState.breathingGuide === "inhale" ? "text-blue-400" : "text-green-400"
-                          }`}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Valsalva countdown */}
-                  {isVascular && scanState.vascularCue === "hold" && (
-                    <div className="flex flex-col items-center">
-                      <div className="w-14 h-14 rounded-full border-2 border-amber-400 flex items-center justify-center bg-amber-500/10">
-                        <span className="text-2xl font-bold text-amber-500 font-mono">{valsalvaSecsLeft}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Ocular icon */}
-                  {isOcular && (
-                    <div className="flex flex-col items-center">
-                      <div className="w-14 h-14 rounded-full border-2 border-cyan-400 flex items-center justify-center bg-cyan-500/10 animate-pulse">
-                        <ScanEye className="w-6 h-6 text-cyan-400" />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Phase description */}
-                  <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                    {PHASE_DESC[scanState.currentPhase]}
-                  </p>
-
-                  {/* Main instruction */}
-                  <p className="text-sm font-semibold text-foreground">
-                    {scanState.instruction}
-                  </p>
-                </div>
-
                 {/* ── Global + phase progress ── */}
-                <div className="w-full space-y-1.5">
+                <div className="w-full space-y-1">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground flex items-center gap-1.5">
                       <span className={`w-2 h-2 rounded-full ${scanState.faceDetected ? "bg-green-500" : "bg-red-500"} animate-pulse`} />
