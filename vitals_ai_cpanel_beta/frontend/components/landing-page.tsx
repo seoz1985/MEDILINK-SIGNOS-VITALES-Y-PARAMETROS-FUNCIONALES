@@ -93,6 +93,32 @@ export function LandingPage() {
         </div>
       </section>
 
+      {/* CTA — Asistente IA */}
+      <section className="py-12 md:py-16">
+        <div className="max-w-3xl mx-auto px-4 text-center">
+          <div className="p-8 md:p-12 rounded-3xl bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border border-primary/10 shadow-2xl shadow-primary/5">
+            <Bot className="w-12 h-12 text-primary mx-auto mb-4" />
+            <h2 className="text-2xl md:text-3xl font-black text-foreground font-[family-name:var(--font-space-grotesk)] tracking-tight mb-3">
+              Tu asistente de salud con IA
+            </h2>
+            <p className="text-muted-foreground max-w-lg mx-auto leading-relaxed mb-6">
+              Nuestro asistente con inteligencia artificial te guiará paso a paso por todo el proceso de evaluación,
+              desde el consentimiento informado hasta la generación de tu reporte clínico con IA.
+            </p>
+            <Button
+              size="lg"
+              className="gap-2.5 px-8 text-base font-bold shadow-lg shadow-primary/25"
+              onClick={() => {
+                setRole("patient")
+                navigate("register")
+              }}
+            >
+              Comenzar ahora <ArrowRight className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      </section>
+
       {/* Features */}
       <section className="py-16 md:py-24">
         <div className="max-w-7xl mx-auto px-4">
@@ -186,32 +212,6 @@ export function LandingPage() {
                 <p className="text-sm text-muted-foreground leading-relaxed">{item.description}</p>
               </div>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="py-16 md:py-24">
-        <div className="max-w-3xl mx-auto px-4 text-center">
-          <div className="p-8 md:p-12 rounded-3xl bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border border-primary/10 shadow-2xl shadow-primary/5">
-            <Bot className="w-12 h-12 text-primary mx-auto mb-4" />
-            <h2 className="text-2xl md:text-3xl font-black text-foreground font-[family-name:var(--font-space-grotesk)] tracking-tight mb-3">
-              Tu asistente de salud con IA
-            </h2>
-            <p className="text-muted-foreground max-w-lg mx-auto leading-relaxed mb-6">
-              Nuestro asistente con inteligencia artificial te guiará paso a paso por todo el proceso de evaluación,
-              desde el consentimiento informado hasta la generación de tu reporte clínico con IA.
-            </p>
-            <Button
-              size="lg"
-              className="gap-2.5 px-8 text-base font-bold shadow-lg shadow-primary/25"
-              onClick={() => {
-                setRole("patient")
-                navigate("register")
-              }}
-            >
-              Comenzar ahora <ArrowRight className="w-4 h-4" />
-            </Button>
           </div>
         </div>
       </section>
