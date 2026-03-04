@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react"
 import { useApp } from "@/lib/app-context"
+import { useSpeech } from "@/hooks/use-speech"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -24,6 +25,10 @@ import {
   Activity,
   Sparkles,
   ChevronDown,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
 } from "lucide-react"
 
 /* ── Types ── */
@@ -131,9 +136,51 @@ function AssistantBubble({ children, typing }: { children: React.ReactNode; typi
   )
 }
 
+/* ── Voice input button for text fields ── */
+function VoiceMicButton({
+  isListening,
+  sttSupported,
+  onPress,
+  onRelease,
+}: {
+  isListening: boolean
+  sttSupported: boolean
+  onPress: () => void
+  onRelease: () => void
+}) {
+  if (!sttSupported) return null
+  return (
+    <button
+      type="button"
+      onMouseDown={onPress}
+      onMouseUp={onRelease}
+      onTouchStart={onPress}
+      onTouchEnd={onRelease}
+      className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full transition-all ${
+        isListening
+          ? "bg-red-500/20 text-red-500 animate-pulse"
+          : "bg-muted/60 text-muted-foreground hover:text-primary hover:bg-primary/10"
+      }`}
+      title={isListening ? "Escuchando..." : "Mantén presionado para dictar"}
+    >
+      {isListening ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
+    </button>
+  )
+}
+
 /* ═══════════════════════════════════════════════════════════════ */
 /*  MAIN COMPONENT                                                */
 /* ═══════════════════════════════════════════════════════════════ */
+
+/** Messages Virma speaks at each step */
+const STEP_VOICE_MESSAGES: Record<number, string> = {
+  0: "¡Hola! Soy Virma, tu asistente virtual de salud. Te acompañaré en el proceso de evaluación de parámetros funcionales mediante nuestra tecnología de inteligencia artificial. El proceso toma solo 2 a 3 minutos. ¿Comenzamos?",
+  1: "Antes de continuar, es necesario que leas y aceptes nuestro consentimiento informado. Por favor lee el documento completo desplazándote hasta el final.",
+  2: "Ahora necesito tus datos de identificación. Puedes escribir o usar el micrófono para dictar. ¿Realizas esta evaluación para ti mismo o para otra persona como acudiente?",
+  3: "Déjame explicarte en qué consiste el procedimiento. Esta evaluación utiliza inteligencia artificial y la cámara de tu celular para estimar parámetros funcionales. No es una toma de signos vitales convencional. Los resultados son probabilísticos y deben correlacionarse con atención médica profesional.",
+  4: "Último paso antes de la toma. Necesito conocer el motivo de tu consulta y algunos antecedentes clínicos para orientar el análisis de inteligencia artificial. Puedes usar el micrófono para dictar.",
+}
+
 export function PatientOnboarding() {
   const { navigate, setOnboardingData } = useApp()
   const [step, setStep] = useState(0)
@@ -144,12 +191,73 @@ export function PatientOnboarding() {
   const [questionnaire, setQ] = useState<MedicalQuestionnaire>(INITIAL_QUESTIONNAIRE)
   const consentRef = useRef<HTMLDivElement>(null)
 
-  // Simular typing del asistente al cambiar paso
+  /* ── Voice field target for STT ── */
+  const [voiceTarget, setVoiceTarget] = useState<string | null>(null)
+
+  /* ── Speech hook ── */
+  const {
+    speak,
+    stopSpeaking,
+    isSpeaking,
+    ttsSupported,
+    muted,
+    toggleMute,
+    startListening,
+    stopListening,
+    isListening,
+    sttSupported,
+  } = useSpeech({
+    lang: "es-CO",
+    rate: 0.95,
+    pitch: 1.05,
+    onResult: (transcript, isFinal) => {
+      if (!voiceTarget || !isFinal) return
+      // Route dictated text to the correct field
+      const value = transcript.trim()
+      if (voiceTarget.startsWith("patient.")) {
+        const field = voiceTarget.replace("patient.", "") as keyof PatientIdentification
+        if (field === "patient_age") {
+          const num = parseInt(value.replace(/\D/g, ""), 10)
+          if (!isNaN(num)) setPatient((p) => ({ ...p, patient_age: num }))
+        } else {
+          setPatient((p) => ({ ...p, [field]: value }))
+        }
+      } else if (voiceTarget === "chief_complaint_voice") {
+        // For free-text chief complaint dictation — map common phrases
+        setQ((p) => ({ ...p, chief_complaint: "otro" }))
+      }
+      setVoiceTarget(null)
+    },
+  })
+
+  /** Start mic for a specific field */
+  const startVoiceFor = useCallback(
+    (field: string) => {
+      setVoiceTarget(field)
+      startListening()
+    },
+    [startListening]
+  )
+
+  const stopVoice = useCallback(() => {
+    stopListening()
+    setVoiceTarget(null)
+  }, [stopListening])
+
+  // Simular typing del asistente al cambiar paso → luego hablar
   useEffect(() => {
     setTyping(true)
-    const t = setTimeout(() => setTyping(false), 800 + Math.random() * 600)
-    return () => clearTimeout(t)
-  }, [step])
+    const t = setTimeout(() => {
+      setTyping(false)
+      // Auto-speak Virma's message for this step
+      const msg = STEP_VOICE_MESSAGES[step]
+      if (msg) speak(msg)
+    }, 800 + Math.random() * 600)
+    return () => {
+      clearTimeout(t)
+      stopSpeaking()
+    }
+  }, [step]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Consent scroll tracking
   const handleConsentScroll = useCallback(() => {
@@ -215,7 +323,37 @@ export function PatientOnboarding() {
             </div>
             <span className="font-bold text-foreground font-[family-name:var(--font-space-grotesk)]">VitaLink</span>
           </div>
-          <span className="text-xs text-muted-foreground font-mono">{step + 1}/5</span>
+          <div className="flex items-center gap-2">
+            {/* Voice toggle */}
+            {ttsSupported && (
+              <button
+                onClick={toggleMute}
+                className={`p-1.5 rounded-full transition-all ${
+                  muted ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary"
+                }`}
+                title={muted ? "Activar voz" : "Silenciar voz"}
+              >
+                {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              </button>
+            )}
+            {/* Speaking indicator */}
+            {isSpeaking && (
+              <div className="flex items-center gap-0.5">
+                {[0, 1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className="w-0.5 bg-primary rounded-full animate-pulse"
+                    style={{
+                      height: `${8 + Math.random() * 8}px`,
+                      animationDelay: `${i * 100}ms`,
+                      animationDuration: "0.6s",
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+            <span className="text-xs text-muted-foreground font-mono">{step + 1}/5</span>
+          </div>
         </div>
 
         {/* Step indicator */}
@@ -256,7 +394,7 @@ export function PatientOnboarding() {
             <AssistantBubble typing={typing}>
               <div className="space-y-3">
                 <p className="font-semibold text-base">
-                  ¡Hola! 👋 Soy <span className="text-primary">Ana</span>, tu asistente virtual de salud.
+                  ¡Hola! 👋 Soy <span className="text-primary">Virma</span>, tu asistente virtual de salud.
                 </p>
                 <p>
                   Te acompañaré en el proceso de <strong>evaluación de parámetros funcionales</strong> mediante nuestra tecnología de inteligencia artificial.
@@ -498,12 +636,21 @@ export function PatientOnboarding() {
                       </p>
                       <div className="space-y-2">
                         <Label htmlFor="guardian_name" className="text-xs">Nombre completo del acudiente</Label>
-                        <Input
-                          id="guardian_name"
-                          placeholder="Nombre del acudiente"
-                          value={patient.guardian_name}
-                          onChange={(e) => updatePatient("guardian_name", e.target.value)}
-                        />
+                        <div className="relative">
+                          <Input
+                            id="guardian_name"
+                            placeholder="Nombre del acudiente"
+                            value={patient.guardian_name}
+                            onChange={(e) => updatePatient("guardian_name", e.target.value)}
+                            className="pr-9"
+                          />
+                          <VoiceMicButton
+                            isListening={isListening && voiceTarget === "patient.guardian_name"}
+                            sttSupported={sttSupported}
+                            onPress={() => startVoiceFor("patient.guardian_name")}
+                            onRelease={stopVoice}
+                          />
+                        </div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-2">
@@ -517,12 +664,21 @@ export function PatientOnboarding() {
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="guardian_doc" className="text-xs">Número de documento</Label>
-                          <Input
-                            id="guardian_doc"
-                            placeholder="Número"
-                            value={patient.guardian_document_number}
-                            onChange={(e) => updatePatient("guardian_document_number", e.target.value)}
-                          />
+                          <div className="relative">
+                            <Input
+                              id="guardian_doc"
+                              placeholder="Número"
+                              value={patient.guardian_document_number}
+                              onChange={(e) => updatePatient("guardian_document_number", e.target.value)}
+                              className="pr-9"
+                            />
+                            <VoiceMicButton
+                              isListening={isListening && voiceTarget === "patient.guardian_document_number"}
+                              sttSupported={sttSupported}
+                              onPress={() => startVoiceFor("patient.guardian_document_number")}
+                              onRelease={stopVoice}
+                            />
+                          </div>
                         </div>
                       </div>
                       <div className="space-y-2">
@@ -545,12 +701,21 @@ export function PatientOnboarding() {
                     </p>
                     <div className="space-y-2">
                       <Label htmlFor="patient_name" className="text-xs">Nombre completo</Label>
-                      <Input
-                        id="patient_name"
-                        placeholder={patient.registration_type === "guardian" ? "Nombre del paciente" : "Tu nombre completo"}
-                        value={patient.patient_name}
-                        onChange={(e) => updatePatient("patient_name", e.target.value)}
-                      />
+                      <div className="relative">
+                        <Input
+                          id="patient_name"
+                          placeholder={patient.registration_type === "guardian" ? "Nombre del paciente" : "Tu nombre completo"}
+                          value={patient.patient_name}
+                          onChange={(e) => updatePatient("patient_name", e.target.value)}
+                          className="pr-9"
+                        />
+                        <VoiceMicButton
+                          isListening={isListening && voiceTarget === "patient.patient_name"}
+                          sttSupported={sttSupported}
+                          onPress={() => startVoiceFor("patient.patient_name")}
+                          onRelease={stopVoice}
+                        />
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-2">
@@ -564,12 +729,21 @@ export function PatientOnboarding() {
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="patient_doc" className="text-xs">Número de documento</Label>
-                        <Input
-                          id="patient_doc"
-                          placeholder="Número"
-                          value={patient.patient_document_number}
-                          onChange={(e) => updatePatient("patient_document_number", e.target.value)}
-                        />
+                        <div className="relative">
+                          <Input
+                            id="patient_doc"
+                            placeholder="Número"
+                            value={patient.patient_document_number}
+                            onChange={(e) => updatePatient("patient_document_number", e.target.value)}
+                            className="pr-9"
+                          />
+                          <VoiceMicButton
+                            isListening={isListening && voiceTarget === "patient.patient_document_number"}
+                            sttSupported={sttSupported}
+                            onPress={() => startVoiceFor("patient.patient_document_number")}
+                            onRelease={stopVoice}
+                          />
+                        </div>
                       </div>
                     </div>
                     <div className="grid grid-cols-3 gap-3">
@@ -587,24 +761,42 @@ export function PatientOnboarding() {
                       </div>
                       <div className="col-span-2 space-y-2">
                         <Label htmlFor="patient_email" className="text-xs">Correo electrónico</Label>
-                        <Input
-                          id="patient_email"
-                          type="email"
-                          placeholder="correo@ejemplo.com"
-                          value={patient.patient_email}
-                          onChange={(e) => updatePatient("patient_email", e.target.value)}
-                        />
+                        <div className="relative">
+                          <Input
+                            id="patient_email"
+                            type="email"
+                            placeholder="correo@ejemplo.com"
+                            value={patient.patient_email}
+                            onChange={(e) => updatePatient("patient_email", e.target.value)}
+                            className="pr-9"
+                          />
+                          <VoiceMicButton
+                            isListening={isListening && voiceTarget === "patient.patient_email"}
+                            sttSupported={sttSupported}
+                            onPress={() => startVoiceFor("patient.patient_email")}
+                            onRelease={stopVoice}
+                          />
+                        </div>
                       </div>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="patient_phone" className="text-xs">Teléfono (opcional)</Label>
-                      <Input
-                        id="patient_phone"
-                        type="tel"
-                        placeholder="+57 300 000 0000"
-                        value={patient.patient_phone}
-                        onChange={(e) => updatePatient("patient_phone", e.target.value)}
-                      />
+                      <div className="relative">
+                        <Input
+                          id="patient_phone"
+                          type="tel"
+                          placeholder="+57 300 000 0000"
+                          value={patient.patient_phone}
+                          onChange={(e) => updatePatient("patient_phone", e.target.value)}
+                          className="pr-9"
+                        />
+                        <VoiceMicButton
+                          isListening={isListening && voiceTarget === "patient.patient_phone"}
+                          sttSupported={sttSupported}
+                          onPress={() => startVoiceFor("patient.patient_phone")}
+                          onRelease={stopVoice}
+                        />
+                      </div>
                     </div>
                   </div>
                 </CardContent>
@@ -802,12 +994,25 @@ export function PatientOnboarding() {
 
       {/* Fixed bottom navigation */}
       <div className="fixed bottom-0 left-0 right-0 bg-card/95 backdrop-blur-md border-t border-border/50 z-50">
+        {/* Listening indicator */}
+        {isListening && (
+          <div className="bg-red-500/10 border-b border-red-500/20 px-4 py-1.5 flex items-center justify-center gap-2">
+            <Mic className="w-3.5 h-3.5 text-red-500 animate-pulse" />
+            <span className="text-xs font-semibold text-red-600 dark:text-red-400">Escuchando... habla ahora</span>
+          </div>
+        )}
         <div className="max-w-lg mx-auto px-4 py-3 flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={back} className="gap-1 text-muted-foreground">
             <ArrowLeft className="w-4 h-4" />
             {step === 0 ? "Salir" : "Atrás"}
           </Button>
-          <div className="flex-1" />
+          <div className="flex-1 text-center">
+            {sttSupported && (step === 2 || step === 4) && !isListening && (
+              <span className="text-[10px] text-muted-foreground/60 flex items-center justify-center gap-1">
+                <Mic className="w-2.5 h-2.5" /> Usa el micrófono para dictar
+              </span>
+            )}
+          </div>
           <Button
             onClick={next}
             disabled={!canNext() || typing}

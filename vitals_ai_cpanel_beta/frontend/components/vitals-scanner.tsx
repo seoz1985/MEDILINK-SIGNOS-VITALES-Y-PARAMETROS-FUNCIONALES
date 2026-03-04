@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react"
 import { useApp, type VitalSigns } from "@/lib/app-context"
+import { useSpeech } from "@/hooks/use-speech"
 import { AppHeader } from "@/components/app-header"
 import { BottomNav } from "@/components/bottom-nav"
 import { Button } from "@/components/ui/button"
@@ -36,6 +37,8 @@ import {
   Clock,
   Video,
   ArrowRight,
+  Volume2,
+  VolumeX,
 } from "lucide-react"
 import { mockVitalsHistory } from "@/lib/mock-data"
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts"
@@ -162,6 +165,22 @@ export function VitalsScanner() {
   const [teleSending, setTeleSending] = useState(false)
   const [teleChoice, setTeleChoice] = useState<"none" | "telemedicine" | "kiosk">("none")
   const [lastVitals, setLastVitals] = useState<any>(null)
+
+  // ── Virma voice (TTS) for scanner guidance ──
+  const { speak: virmaSpeak, stopSpeaking: virmaStop, isSpeaking: virmaIsSpeaking, muted: virmaMuted, toggleMute: virmaToggleMute, ttsSupported: virmaTTS } = useSpeech({ lang: "es-CO", rate: 0.95, pitch: 1.05 })
+  const prevPhaseRef = useRef<AppPhase>(initialPhase)
+  useEffect(() => {
+    if (prevPhaseRef.current === appPhase) return
+    prevPhaseRef.current = appPhase
+    const msgs: Record<string, string> = {
+      idle: "Todo listo. Cuando estés preparado, presiona el botón para iniciar la evaluación. Recuerda mantener buena iluminación y el rostro centrado.",
+      scanning: "Iniciando captura. Mantén tu rostro estable frente a la cámara. El proceso dura aproximadamente 90 segundos.",
+      analyzing: "Captura completada. Estoy analizando tus datos clínicos con inteligencia artificial. Un momento por favor.",
+      complete: "Análisis terminado. Puedes ver tus resultados a continuación. Recuerda que estos valores son estimaciones probabilísticas y deben ser correlacionados con atención médica profesional.",
+    }
+    const msg = msgs[appPhase]
+    if (msg) virmaSpeak(msg)
+  }, [appPhase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Guard nuclear: impide retroceso a questionnaire/idle durante escaneo ──
   const scanActiveRef = useRef(false)
@@ -694,6 +713,35 @@ export function VitalsScanner() {
   return (
     <div className={`min-h-screen bg-gradient-to-b from-background via-background to-muted/30 ${scanLocked ? 'pb-0' : 'pb-20'}`}>
       <AppHeader title="Signos Vitales" subtitle="Monitoreo Clínico con IA" scanLocked={scanLocked} />
+
+      {/* Virma voice bar */}
+      {virmaTTS && (
+        <div className="max-w-lg mx-auto px-4 pt-2">
+          <div className="flex items-center justify-between p-2 rounded-xl bg-muted/50 border border-border/30">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              {virmaIsSpeaking ? (
+                <>
+                  <div className="flex items-center gap-0.5">
+                    {[0,1,2,3].map(i => (
+                      <div key={i} className="w-0.5 bg-primary rounded-full animate-pulse" style={{ height: `${6 + Math.random() * 6}px`, animationDelay: `${i*80}ms`, animationDuration: "0.5s" }} />
+                    ))}
+                  </div>
+                  <span className="font-medium text-primary">Virma está hablando...</span>
+                </>
+              ) : (
+                <span className="font-medium">🤖 Virma — Asistente de voz</span>
+              )}
+            </div>
+            <button
+              onClick={virmaToggleMute}
+              className={`p-1.5 rounded-full transition-all ${virmaMuted ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary"}`}
+              title={virmaMuted ? "Activar voz" : "Silenciar"}
+            >
+              {virmaMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-lg mx-auto px-4 py-4 space-y-4">
         {appPhase === "questionnaire" && (
